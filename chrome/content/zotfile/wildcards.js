@@ -12,16 +12,32 @@ Zotero.ZotFile.Wildcards = new function() {
      * Abbreviation field using Zotero's getAbbreviation function
      */
     function abbreviateField(value) {
-        if (value != "") {
-            abbrv_obj = new Object();
-	        Zotero.Cite.getAbbreviation("N/A", abbrv_obj, "default", "container-title", value);
-            abbrv = abbrv_obj["default"]["container-title"][value];
+        if (value == "") return "";
+        try {
+            var abbrv_obj = {};
+            Zotero.Cite.getAbbreviation("N/A", abbrv_obj, "default", "container-title", value);
+            return abbrv_obj["default"]["container-title"][value] || value;
         }
-        else {
-            abbrv = "";
+        catch (e) {
+            Zotero.logError(e);
+            return value;
         }
+    }
 
-	    return abbrv;
+    /*
+     * Get citation key (native field in recent Zotero versions, 'Citation Key: ...' in extra otherwise)
+     */
+    function getCitekey(item) {
+        var citekey = "";
+        try {
+            citekey = item.getField('citationKey') || "";
+        }
+        catch (e) {}
+        if (citekey == "") {
+            var match = /^\s*Citation Key\s*:\s*(\S+)\s*$/im.exec(item.getField('extra') || "");
+            if (match) citekey = match[1];
+        }
+        return citekey;
     }
 
     /*
@@ -77,7 +93,7 @@ Zotero.ZotFile.Wildcards = new function() {
             title = title.substr(0,max_titlelength);
 
             // remove the last word until a space is found
-            if(Zotero.ZotFile.getPref("truncate_smart") && title.search(" ")!=-1 && before_trunc_char.search(/[a-zA-Z0-9]/!=-1)) {
+            if(Zotero.ZotFile.getPref("truncate_smart") && title.search(" ")!=-1 && before_trunc_char.search(/[a-zA-Z0-9]/)!=-1) {
                 while (title.substring(title.length-1, title.length) != ' ') title = title.substring(0, title.length-1);
                 title = title.substring(0, title.length-1);
             }
@@ -225,7 +241,7 @@ Zotero.ZotFile.Wildcards = new function() {
             "lastAuthor_lastf": authors[9],
             "lastAuthor_initials": authors[10],
             "collectionPaths": Zotero.ZotFile.Utils.getCollectionPathsOfItem(item),
-            "citekey": Zotero.BetterBibTeX ? item.getField('citationKey') : undefined
+            "citekey": getCitekey(item)
         };
         // define transform functions
         var itemtypeWildcard = function(item, map) {
@@ -385,11 +401,9 @@ Zotero.ZotFile.Wildcards = new function() {
             // if it is a collectionPath field. we need to select one element from the array.
             if (lookup && Array.isArray(lookup)) {
                 var getCollectionPathFromTable = function () {
-                    var selectFromList = function(items, message, title) {
-                        var prompts = Components.classes["@mozilla.org/embedcomp/prompt-service;1"]
-                            .getService(Components.interfaces.nsIPromptService);
+                    var selectFromList = function(items, message) {
                         var selected = {};
-                        var result = prompts.select(null, title, message, items.length, items, selected);
+                        var result = Services.prompt.select(Zotero.ZotFile.getMainWindow(), 'ZotFile', message, items, selected);
                         if (!result)  return -1;
 
                         return selected.value;

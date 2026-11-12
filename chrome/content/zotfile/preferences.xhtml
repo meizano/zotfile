@@ -1,0 +1,175 @@
+<!--
+    ZotFile preference pane (shown in the Zotero settings window)
+
+    data-zf:     key of localized string ('ui.' + key in zotfile.properties)
+    data-pref:   name of preference in the 'extensions.zotfile.' branch
+    data-enable: space-separated list of bool preferences that have to be true
+                 (or false with a leading '!') for the element to be enabled
+
+    Everything is wired up in preferences.js
+-->
+<vbox id="zotfile-prefs"
+		xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+		xmlns:html="http://www.w3.org/1999/xhtml">
+
+	<!-- GENERAL SETTINGS -->
+	<groupbox>
+		<label><html:h2 data-zf="attachments-source-folder"/></label>
+		<description data-zf="source-folder-desc"/>
+		<hbox align="center">
+			<html:input type="text" id="zotfile-source_dir" data-pref="source_dir" style="flex: 1"/>
+			<button id="zotfile-source_dir-button" data-zf="choose"/>
+			<label id="zotfile-source_dir-status" value=""/>
+		</hbox>
+	</groupbox>
+
+	<groupbox>
+		<label><html:h2 data-zf="location-of-files"/></label>
+		<description data-zf="target-location-desc"/>
+		<radiogroup id="zotfile-import" data-pref="import">
+			<radio data-zf="attach-stored-copy" value="true"/>
+			<radio data-zf="custom-location" value="false"/>
+		</radiogroup>
+		<vbox class="indented-pref">
+			<hbox align="center">
+				<html:input type="text" id="zotfile-dest_dir" data-pref="dest_dir" data-enable="!import" style="flex: 1"/>
+				<button id="zotfile-dest_dir-button" data-zf="choose" data-enable="!import"/>
+				<label id="zotfile-dest_dir-status" value=""/>
+			</hbox>
+			<hbox align="center">
+				<checkbox data-zf="use-subfolder" data-pref="subfolder" data-enable="!import" native="true"/>
+				<html:input type="text" data-pref="subfolderFormat" data-enable="!import subfolder" style="width: 12em"/>
+			</hbox>
+			<description data-zf="subfolder-information" style="font-size: 0.9em"/>
+		</vbox>
+	</groupbox>
+
+	<!-- TABLET SETTINGS -->
+	<groupbox id="zotfile-tablet-section">
+		<label><html:h2 data-zf="tablet-settings"/></label>
+		<description data-zf="tablet-desc"/>
+		<checkbox id="zotfile-tablet" data-zf="send-get-from-tablet" data-pref="tablet" native="true"/>
+		<vbox class="indented-pref">
+			<label data-zf="base-folder"/>
+			<hbox align="center">
+				<html:input type="text" id="zotfile-tablet.dest_dir" data-pref="tablet.dest_dir" data-enable="tablet" style="flex: 1"/>
+				<button id="zotfile-tablet.dest_dir-button" data-zf="choose" data-enable="tablet"/>
+				<label id="zotfile-tablet.dest_dir-status" value=""/>
+			</hbox>
+			<description data-zf="dropbox" style="font-size: 0.9em"/>
+			<separator class="thin"/>
+
+			<label data-zf="subfolders"/>
+			<radiogroup id="zotfile-tablet-projectFolders" data-pref="tablet.projectFolders" data-enable="tablet">
+				<radio data-zf="no-subfolders" value="0"/>
+				<radio data-zf="create-subfolders" value="1"/>
+				<radio data-zf="custom-subfolders" value="2"/>
+			</radiogroup>
+			<hbox class="indented-pref" align="start">
+				<html:select id="zotfile-tablet-subfolders" size="6" data-enable="tablet" style="flex: 1; min-width: 0"/>
+				<vbox>
+					<button id="zotfile-tablet-subfolders-add" label="+" data-enable="tablet"/>
+					<button id="zotfile-tablet-subfolders-edit" data-zf="edit-folder" data-enable="tablet"/>
+					<button id="zotfile-tablet-subfolders-delete" data-zf="delete-folder" data-enable="tablet"/>
+					<button id="zotfile-tablet-subfolders-up" data-zf="move-up" data-enable="tablet"/>
+					<button id="zotfile-tablet-subfolders-down" data-zf="move-down" data-enable="tablet"/>
+				</vbox>
+			</hbox>
+			<hbox align="center">
+				<checkbox data-zf="use-additional-subfolders" data-pref="tablet.subfolder" data-enable="tablet" native="true"/>
+				<html:input type="text" data-pref="tablet.subfolderFormat" data-enable="tablet tablet.subfolder" style="width: 12em"/>
+			</hbox>
+			<separator class="thin"/>
+
+			<checkbox data-zf="rename-when-sent-to-tablet" data-pref="tablet.rename" data-enable="tablet" native="true"/>
+			<hbox align="center">
+				<checkbox data-zf="save-annotated-file" data-pref="tablet.storeCopyOfFile" data-enable="tablet" native="true"/>
+				<html:input type="text" data-pref="tablet.storeCopyOfFile_suffix" data-enable="tablet tablet.storeCopyOfFile" style="width: 12em"/>
+			</hbox>
+			<description data-zf="tablet-copy-information" style="font-size: 0.9em"/>
+			<hbox align="center">
+				<label data-zf="add-saved-searches"/>
+				<button id="zotfile-tablet-search" data-zf="attachments-on-tablet" data-enable="tablet"/>
+				<button id="zotfile-tablet-search-modified" data-zf="modified-attachments-on-tablet" data-enable="tablet"/>
+			</hbox>
+		</vbox>
+	</groupbox>
+
+	<!-- RENAMING RULES -->
+	<groupbox>
+		<label><html:h2 data-zf="renaming-rules"/></label>
+		<label data-zf="preview-renaming-rules"/>
+		<hbox align="center">
+			<html:input type="text" id="zotfile-preview" readonly="readonly" style="flex: 1"/>
+			<button id="zotfile-preview-button" data-zf="update"/>
+		</hbox>
+		<separator class="thin"/>
+
+		<checkbox data-zf="zotero-to-rename" data-pref="useZoteroToRename" native="true"/>
+		<label data-zf="format-for-all-types"/>
+		<html:input type="text" id="zotfile-renameFormat" data-pref="renameFormat" data-enable="!useZoteroToRename"/>
+		<label data-zf="format-for-patents"/>
+		<html:input type="text" id="zotfile-renameFormat_patent" data-pref="renameFormat_patent" data-enable="!useZoteroToRename"/>
+		<description data-zf="list-of-wildcards" style="font-size: 0.9em"/>
+		<hbox align="center">
+			<label data-zf="for-a-full-list" style="font-size: 0.9em; margin-inline-end: 0"/>
+			<label id="zotfile-website-link" class="text-link zotero-text-link" data-zf="zotfile-website" style="font-size: 0.9em; margin-inline-start: 0.3em"/>
+		</hbox>
+		<separator class="thin"/>
+
+		<hbox align="center">
+			<label data-zf="delimiter-multiple-authors"/>
+			<html:input type="text" data-pref="authors_delimiter" data-enable="!useZoteroToRename" style="width: 4em"/>
+		</hbox>
+		<hbox align="center">
+			<checkbox data-zf="add-user-input-to-filename" data-pref="userInput" native="true"/>
+			<html:input type="text" data-pref="userInput_Default" data-enable="userInput" style="width: 12em"/>
+		</hbox>
+		<checkbox data-zf="lower-case" data-pref="lower_case" data-enable="!useZoteroToRename" native="true"/>
+		<checkbox data-zf="replace-blanks" data-pref="replace_blanks" data-enable="!useZoteroToRename" native="true"/>
+		<checkbox data-zf="truncate-title" data-pref="truncate_title" data-enable="!useZoteroToRename" native="true"/>
+		<hbox align="center">
+			<label data-zf="zotfile-truncate_title_max"/>
+			<html:input type="number" min="1" data-pref="max_titlelength" data-enable="!useZoteroToRename" style="width: 5em"/>
+		</hbox>
+		<hbox align="center">
+			<checkbox data-zf="zotfile-truncate_authors" data-pref="truncate_authors" data-enable="!useZoteroToRename" native="true"/>
+			<html:input type="number" min="1" data-pref="max_authors" data-enable="!useZoteroToRename truncate_authors" style="width: 5em"/>
+		</hbox>
+		<hbox align="center">
+			<label data-zf="zotfile-number_truncate_authors"/>
+			<html:input type="number" min="1" data-pref="number_truncate_authors" data-enable="!useZoteroToRename truncate_authors" style="width: 5em"/>
+		</hbox>
+		<hbox align="center">
+			<checkbox data-zf="zotfile-add_etal" data-pref="add_etal" data-enable="!useZoteroToRename" native="true"/>
+			<html:input type="text" data-pref="etal" data-enable="!useZoteroToRename add_etal" style="width: 8em"/>
+		</hbox>
+	</groupbox>
+
+	<!-- ADVANCED SETTINGS -->
+	<groupbox>
+		<label><html:h2 data-zf="other-advanced-settings"/></label>
+		<hbox align="center">
+			<label data-zf="automatic_renaming_label"/>
+			<menulist id="zotfile-automatic_renaming" data-pref="automatic_renaming" native="true">
+				<menupopup>
+					<menuitem data-zf="automatic_renaming_no" value="1"/>
+					<menuitem data-zf="automatic_renaming_ask" value="2"/>
+					<menuitem data-zf="automatic_renaming_ask_mult" value="3"/>
+					<menuitem data-zf="automatic_renaming_always" value="4"/>
+				</menupopup>
+			</menulist>
+		</hbox>
+		<checkbox data-zf="ask-when-attaching-new-files" data-pref="confirmation" native="true"/>
+		<hbox align="center">
+			<checkbox data-zf="ask-to-batch-rename" data-pref="confirmation_batch_ask" native="true"/>
+			<html:input type="number" min="1" data-pref="confirmation_batch" data-enable="confirmation_batch_ask" style="width: 5em"/>
+			<label data-zf="or-more-attachments"/>
+		</hbox>
+		<checkbox data-zf="remove-special-characters" data-pref="removeDiacritics" data-enable="!useZoteroToRename" native="true"/>
+		<hbox align="center">
+			<checkbox data-zf="work-with-following-filetypes" data-pref="useFileTypes" native="true"/>
+			<html:input type="text" data-pref="filetypes" data-enable="useFileTypes" style="flex: 1"/>
+		</hbox>
+	</groupbox>
+</vbox>

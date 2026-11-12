@@ -1,10 +1,189 @@
 /**
  * Zotero.ZotFile.Tablet
  * Functions related to tablet features
+ *
+ * Information about attachments on the tablet (location, mode, modification time, subfolder)
+ * is stored in the file 'zotfile-tablet.json' in the Zotero data directory. Earlier versions
+ * of zotfile stored it as hidden data in the attachment note; that data is still read and is
+ * moved to the new store whenever it is updated.
  */
 Zotero.ZotFile.Tablet = new function() {
 
-    this.extractPdfs = [];
+    var zz = Zotero.ZotFile,
+        self = this;
+    var store = {},
+        storePath = null,
+        storeWrite = Promise.resolve();
+
+    Object.defineProperty(this, 'tag', {get: () => zz.getPref('tablet.tag')});
+    Object.defineProperty(this, 'tagMod', {get: () => zz.getPref('tablet.tagModified')});
+
+    // ===================== //
+    // STORE FOR TABLET INFO //
+    // ===================== //
+
+    /**
+     * Load information about tablet attachments (called once on startup)
+     */
+    this.loadStore = async function() {
+        storePath = zz.Path.join(Zotero.DataDirectory.dir, 'zotfile-tablet.json');
+        store = {};
+        if (!(await zz.Path.exists(storePath))) return;
+        try {
+            var data = await IOUtils.readJSON(storePath);
+            if (data && typeof data == 'object') store = data;
+        }
+        catch (e) {
+            Zotero.logError(e);
+            // keep the unreadable file instead of overwriting it
+            try {
+                await IOUtils.move(storePath, storePath + '.corrupt-' + Date.now());
+            }
+            catch (e2) {
+                Zotero.logError(e2);
+            }
+        }
+    };
+
+    var saveStore = function() {
+        if (!storePath) return storeWrite;
+        var json = JSON.stringify(store, null, 1);
+        storeWrite = storeWrite
+            .then(() => IOUtils.writeUTF8(storePath, json, {tmpPath: storePath + '.tmp'}))
+            .catch(e => Zotero.logError(e));
+        return storeWrite;
+    };
+
+    /**
+     * Wait until all changes are written to disk
+     */
+    this.flushStore = function() {
+        return storeWrite;
+    };
+
+    var storeKey = function(att) {
+        return att.libraryID + '/' + att.key;
+    };
+
+    /**
+     * Get tablet data that previous versions of zotfile saved in the attachment note
+     * @return {object} Object with doc (parsed note), node (element with data) and data, or null
+     */
+    var getLegacyInfo = function(att) {
+        try {
+            var content = att.getNote();
+            if (!content || content.indexOf('lastmod') == -1) return null;
+            var doc = new DOMParser().parseFromString(content.replace(/zotero:\/\//g, 'http://zotfile.com/'), 'text/html'),
+                node = doc.querySelector('#zotfile-data');
+            if (node === null) node = doc.querySelector('[title*="lastmod"][title*="projectFolder"]');
+            if (node === null) return null;
+            return {doc: doc, node: node, data: JSON.parse(node.getAttribute('title').replace(/&quot;/g, '"'))};
+        }
+        catch (e) {
+            return null;
+        }
+    };
+
+    /**
+     * Remove tablet data from attachment note. A separate save() is required to update the database.
+     */
+    var removeLegacyInfo = function(att, legacy) {
+        legacy = legacy || getLegacyInfo(att);
+        if (!legacy) return;
+        legacy.node.remove();
+        var content = legacy.doc.body.innerHTML.replace(/http:\/\/zotfile.com\//g, 'zotero://');
+        att.setNote(content.trim());
+    };
+
+    var getData = function(att) {
+        var key = storeKey(att);
+        if (key in store) return store[key];
+        var legacy = getLegacyInfo(att);
+        return legacy ? legacy.data : null;
+    };
+
+    /**
+     * Get tablet information for attachment
+     * @param  {Zotero.Item} att Zotero attachment item
+     * @param  {string}      key 'mode', 'location', 'lastmod' or 'projectFolder'
+     * @return {string|int}      Value or '' if not available
+     */
+    this.getInfo = function(att, key) {
+        try {
+            var data = getData(att),
+                value = data && key in data ? data[key] : undefined;
+            if (value === undefined || value === null) return '';
+            // for location tag: replace [BaseFolder] with destination folder
+            if(key == 'location') value = value.replace('[BaseFolder]', zz.getPref('tablet.dest_dir'));
+            // for location and projectFolder tag: correct window/mac file system
+            if(['location', 'projectFolder'].includes(key) && Zotero.isWin) value = value.replace(/\//g, '\\');
+            if(['location', 'projectFolder'].includes(key) && !Zotero.isWin) value = value.replace(/\\/g, '/');
+            return value;
+        }
+        catch (err) {
+            return '';
+        }
+    };
+
+    /**
+     * Add tablet information for attachment. If the attachment has data from a previous
+     * version in its note, a separate save() is required to update the database.
+     * @param {Zotero.Item} att   Zotero attachment item.
+     * @param {Object}      data  Object with data to save
+     */
+    this.addInfo = function(att, data) {
+        var key = storeKey(att),
+            current = {};
+        if (key in store) current = store[key];
+        else {
+            let legacy = getLegacyInfo(att);
+            if (legacy) {
+                current = legacy.data;
+                removeLegacyInfo(att, legacy);
+            }
+        }
+        data = Object.assign({}, data);
+        // for location tag: replace destination folder with [BaseFolder]
+        if('location' in data && zz.getPref('tablet.dest_dir_relativePath'))
+            data.location = data.location.replace(zz.Path.normalize(zz.getPref('tablet.dest_dir')), '[BaseFolder]');
+        store[key] = Object.assign({}, current, data);
+        saveStore();
+    };
+
+    /**
+     * Remove tablet information for attachment. A separate save() is required to update the database.
+     * @param {Zotero.Item} att Zotero attachment item.
+     */
+    this.clearInfo = function(att) {
+        var key = storeKey(att);
+        if (key in store) {
+            delete store[key];
+            saveStore();
+        }
+        removeLegacyInfo(att);
+    };
+
+    /**
+     * Transfer tablet information to the attachment item that replaces another one
+     */
+    this.moveInfo = function(att, attNew) {
+        var key = storeKey(att);
+        if (!(key in store) || att.id == attNew.id) return;
+        store[storeKey(attNew)] = store[key];
+        delete store[key];
+        saveStore();
+    };
+
+    /**
+     * Modification time of file in milliseconds
+     */
+    var getModificationTime = async function(path) {
+        return Math.floor((await IOUtils.stat(path)).lastModified);
+    };
+
+    // ==== //
+    // TAGS //
+    // ==== //
 
     /**
      * Add tablet tag to attachment and parent item. A separate save() for attachment and parent item
@@ -14,10 +193,8 @@ Zotero.ZotFile.Tablet = new function() {
      * @return {void}
      */
     this.addTabletTag = function (att, tag) {
-        // get parent item
         var item = Zotero.Items.get(att.parentItemID);
-        // get tag IDs
-        var tag_remove = (tag == this.Tablet.tag) ? this.Tablet.tagMod : this.Tablet.tag;
+        var tag_remove = (tag == self.tag) ? self.tagMod : self.tag;
         // add tag to parent and attachment
         att.addTag(tag);
         item.addTag(tag);
@@ -28,7 +205,7 @@ Zotero.ZotFile.Tablet = new function() {
             if (!atts.some(att => att.hasTag(tag_remove)))
                 item.removeTag(tag_remove);
         }
-    }.bind(Zotero.ZotFile);
+    };
 
     /**
      * Remove tablet tag from attachment and parent item
@@ -46,708 +223,563 @@ Zotero.ZotFile.Tablet = new function() {
             if(!atts.some(att => att.hasTag(tag)))
                 item.removeTag(tag);
         }
-    }.bind(Zotero.ZotFile);
+    };
 
-    this.createSavedSearch = function(which) {
+    this.createSavedSearch = async function(which) {
         if(which == 'tablet' || which == 'both') {
-            var search = new Zotero.Search();
-            search.addCondition('tag', 'contains', this.Tablet.tag);
+            let search = new Zotero.Search();
+            search.libraryID = Zotero.Libraries.userLibraryID;
+            search.addCondition('tag', 'contains', self.tag);
             search.addCondition('includeParentsAndChildren', 'true');
             search.addCondition('noChildren', 'true');
             search.name = 'Tablet Files';
-            search.saveTx();
+            await search.saveTx();
         }
         if(which == 'tablet_modified' || which == 'both') {
-            var search_modified = new Zotero.Search();
-            search_modified.addCondition('tag', 'is', this.Tablet.tagMod);
-            search_modified.name = 'Tablet Files (modified)';
-            search_modified.saveTx();
+            let search = new Zotero.Search();
+            search.libraryID = Zotero.Libraries.userLibraryID;
+            search.addCondition('tag', 'is', self.tagMod);
+            search.name = 'Tablet Files (modified)';
+            await search.saveTx();
         }
-    }.bind(Zotero.ZotFile);
+    };
 
-    this.getSelectedAttachmentsFromTablet = Zotero.Promise.coroutine(function* () {
-        this.Tablet.extractPdfs = [];
-        // get selected attachments, filter for tablet
-        var atts = Zotero.Items.get(this.getSelectedAttachments())
-            .filter(this.Tablet.getTabletStatus)
-            .filter(this.checkFileType);
-        // confirm
-        if (this.getPref("confirmation_batch_ask") && atts.length >= this.getPref("confirmation_batch"))
-            if(!confirm(this.ZFgetString('tablet.getAttachments', [atts.length])))
-                return;
-        // show notification
-        var progressWin = this.progressWindow(this.ZFgetString('tablet.AttsGot')),
-            description = atts.length == 0;
-        // iterate through attachments
-        for (let i = 0; i < atts.length; i++) {
-            var att = atts[i],
-                progress = new progressWin.ItemProgress(att.getImageSrc(), att.getField('title'));
-            // check attachment
-            if(!(yield att.fileExists()) || att.isTopLevelItem()) {
-                description = true;
-                progress.setError();
-                continue;
-            }
-            // get attachment from tablet
-            att = yield this.Tablet.getAttachmentFromTablet(att, false);
-            // update progress window
-            progress.complete(att.attachmentFilename, att.getImageSrc());
-        }
-        // show messages and handle errors
-        if(description) progressWin.addDescription(this.ZFgetString('general.warning.skippedAtt.msg'));
-        progressWin.startCloseTimer(this.getPref("info_window_duration"));
-        // extract annotations
-        if(this.Tablet.extractPdfs.length > 0)
-            this.pdfAnnotations.getAnnotations(this.Tablet.extractPdfs);
-    }.bind(Zotero.ZotFile));
-
-    this.clearInfo = function (att) {
-        try {
-            var parser = Components.classes["@mozilla.org/xmlextras/domparser;1"]
-                    .createInstance(Components.interfaces.nsIDOMParser);
-            var content = att.getNote().replace(/zotero:\/\//g, 'http://zotfile.com/'),
-                doc = parser.parseFromString(content, 'text/html'),
-                p = doc.querySelector('#zotfile-data');
-            if(p === null) p = doc.querySelector('[title*="lastmod"][title*="projectFolder"]');
-            if (p !== null) doc.removeChild(p);
-            // save content back to note
-            content = doc.documentElement.innerHTML
-                // remove old zotfile data
-                .replace(/(lastmod|mode|location|projectFolder)\{.*?\};?/g,'')
-                // replace links with zotero links
-                .replace(/http:\/\/zotfile.com\//g, 'zotero://');
-            att.setNote(content);
-        }
-        catch(e) {
-            att.setNote('');
-        }
-    }.bind(Zotero.ZotFile);
-
-    this.getInfo = function(att, key) {
-        try {
-            var parser = Components.classes["@mozilla.org/xmlextras/domparser;1"]
-                    .createInstance(Components.interfaces.nsIDOMParser);
-            var value,
-                content = att.getNote(),
-                doc = parser.parseFromString(content, 'text/html'),
-                p = doc.querySelector('#zotfile-data');
-            if(p === null) p = doc.querySelector('[title*="lastmod"][title*="projectFolder"]');
-            if(p === null) {
-                // support for old system
-                var search = content.search(key);
-                value = content.substring(search);
-                value = value.substring(value.search('{') + 1, value.search('}'));
-            }
-            else {
-                var data = JSON.parse(p.getAttribute('title').replace(/&quot;/g, '"'));
-                value = key in data ? data[key] : undefined;
-            }
-            // for location tag: replace [BaseFolder] with destination folder
-            if(key == 'location') value = value.replace('[BaseFolder]', this.getPref('tablet.dest_dir'));
-            // for location and projectFolder tag: correct window/mac file system
-            if(['location', 'projectFolder'].includes(key) && Zotero.isWin) value = value.replace(/\//g, '\\');
-            if(['location', 'projectFolder'].includes(key) && !Zotero.isWin) value = value.replace(/\\/g, '/');
-            // return
-            return value;
-        }
-        catch (err) {
-            return '';
-        }
-    }.bind(Zotero.ZotFile);
-
-    /**
-     * Add tablet information to attachment note. A separate save() is required to update the database.
-     * @param {Zotero.Item} att   Zotero attachment item.
-     * @param {Object}      data  Object with data to save in zotero note
-     * @yield {void}
-     */
-    this.addInfo = function(att, data) {
-        // get current content of note
-        var win = Services.wm.getMostRecentWindow('navigator:browser'),
-            parser = Components.classes["@mozilla.org/xmlextras/domparser;1"]
-                        .createInstance(Components.interfaces.nsIDOMParser),
-            content = att.getNote().replace(/zotero:\/\//g, 'http://zotfile.com/'),
-            doc = parser.parseFromString(content, 'text/html'),
-            p = doc.querySelector('#zotfile-data');
-        if(p === null) p = doc.querySelector('[title*="lastmod"][title*="projectFolder"]');
-        // for location tag: replace destination folder with [BaseFolder]
-        if('location' in data && this.getPref('tablet.dest_dir_relativePath'))
-            data.location = data.location.replace(this.getPref('tablet.dest_dir'), '[BaseFolder]');
-        // doesn't exists...
-        if (p === null) {
-            p = win.document.createElementNS(this.xhtml, 'p');
-            p.setAttribute('id', 'zotfile-data');
-            p.setAttribute('style', 'color: #cccccc;');
-            p.setAttribute('title', JSON.stringify(data));
-            p.textContent = '(hidden zotfile data)';
-            doc.body.appendChild(p);
-        }
-        // already exists...
-        else {
-             var attData = JSON.parse(p.getAttribute('title').replace(/&quot;/g, '"'));
-            for (var attr in data) attData[attr] = data[attr];
-            p.setAttribute('title', JSON.stringify(attData));
-        }
-        // save changes in zotero note
-        att.setNote(doc.documentElement.innerHTML.replace(/http:\/\/zotfile.com\//g, 'zotero://'));
-    }.bind(Zotero.ZotFile);
+    // ====== //
+    // STATUS //
+    // ====== //
 
     this.getTabletStatus = function(att) {
         if(!att) return false;
-        return att.isAttachment() && (att.hasTag(this.Tablet.tag) || att.hasTag(this.Tablet.tagMod));
-    }.bind(Zotero.ZotFile);
+        return att.isAttachment() && (att.hasTag(self.tag) || att.hasTag(self.tagMod));
+    };
 
     /**
      * Was the tablet file modified?
-     * @param {Zotero.Item} att Zotero attachment item.
-     * @yield {bool}            Was the tablet file modified?
+     * @param  {Zotero.Item} att Zotero attachment item.
+     * @return {bool}            Was the tablet file modified?
      */
-    this.getTabletStatusModified = Zotero.Promise.coroutine(function* (att) {
-        if (!this.Tablet.getTabletStatus(att))
+    this.getTabletStatusModified = async function (att) {
+        if (!self.getTabletStatus(att))
             return false;
-        var path = yield this.Tablet.getTabletFilePath(att);
+        var path = await self.getTabletFilePath(att, false);
         if (!path) return false;
-        // compare modification time in att note with modification time of tablet file
-        var lastmod_tablet = this.Tablet.getInfo(att, 'lastmod'),
-            lastmod_file = Date.parse((yield OS.File.stat(path)).lastModificationDate) + '';
-        return lastmod_file != lastmod_tablet && lastmod_tablet != '';
-    }.bind(Zotero.ZotFile));
-
-    /**
-     * Reveal tablet file by showing enclosing folder
-     * @yield {void}
-     */
-    this.showTabletFile = Zotero.Promise.coroutine(function* () {
-        var win = Services.wm.getMostRecentWindow("navigator:browser"),
-            att = win.ZoteroPane.getSelectedItems()[0],
-            tablet = this.Tablet.getTabletStatus(att);
-        if (!tablet) return;
-        var path = yield this.Tablet.getTabletFilePath(att);
-        if(yield OS.File.exists(path)) Zotero.File.pathToFile(path).reveal();
-    }.bind(Zotero.ZotFile));
-
-    /**
-     * Open tablet file in default application
-     * @yield {void}
-     */
-    this.openTabletFile = Zotero.Promise.coroutine(function* () {
-        var win = Services.wm.getMostRecentWindow("navigator:browser"),
-            att = win.ZoteroPane.getSelectedItems()[0],
-            tablet = this.Tablet.getTabletStatus(att);
-        if (!tablet) return;
-        var path = yield this.Tablet.getTabletFilePath(att);
-        if(yield OS.File.exists(path)) Zotero.launchFile(path);
-    }.bind(Zotero.ZotFile));
+        // compare saved modification time with modification time of tablet file
+        var lastmod_tablet = self.getInfo(att, 'lastmod'),
+            lastmod_file = await getModificationTime(path);
+        return lastmod_tablet !== '' && lastmod_file != parseInt(lastmod_tablet, 10);
+    };
 
     /**
      * Get the path to the tablet file
-     * @param {Zotero.Item} att     Zotero attachment item.
-     * @param {bool}        verbose Show error message if file does not exists
-     * @yield {string}              Path to file on tablet or false if file does not exists.
+     * @param  {Zotero.Item} att     Zotero attachment item.
+     * @param  {bool}        verbose Show error message if file does not exists
+     * @return {string}              Path to file on tablet or false if file does not exists.
      */
-    this.getTabletFilePath = Zotero.Promise.coroutine(function* (att, verbose) {
-        var verbose = typeof verbose !== 'undefined' ? verbose : true;
+    this.getTabletFilePath = async function (att, verbose) {
+        verbose = typeof verbose !== 'undefined' ? verbose : true;
         // foreground mode
-        if(this.Tablet.getInfo(att, 'mode') == 2)
-            return yield att.getFilePathAsync();
+        if(self.getInfo(att, 'mode') == 2)
+            return await att.getFilePathAsync();
         // background mode
-        var path = this.Tablet.getInfo(att, 'location');
-        if(!(yield OS.File.exists(path))) {
-            if (verbose) this.infoWindow('ZotFile Error', 'The file "' + path + '" does not exist.');
+        var path = self.getInfo(att, 'location');
+        if(!(await zz.Path.exists(path))) {
+            if (verbose) zz.infoWindow('ZotFile Error', 'The file "' + path + '" does not exist.');
             return false;
         }
         return path;
-    }.bind(Zotero.ZotFile));
+    };
 
     this.getTabletLocationFile = function(subfolder) {
         if(subfolder == null) subfolder = '';
-        // OS.Path.join(this.getPref('tablet.dest_dir'), subfolder)
-        return this.Utils.joinPath(this.getPref('tablet.dest_dir'), subfolder)
-    }.bind(Zotero.ZotFile);
+        return zz.Path.join(zz.getPref('tablet.dest_dir'), subfolder);
+    };
 
-    this.tabletFileMissing = Zotero.Promise.coroutine(function* (att) {
-        // foreground mode
-        if(this.Tablet.getInfo(att, 'mode') == 2) {
-            var path = yield att.getFilePathAsync();
-            var exist = yield OS.File.exists(path);
-            return !exist;
-        }
-        if(this.Tablet.getInfo(att, 'mode') == 1) {
-            var path = this.Tablet.getInfo(att, 'location');
-            var exist = yield OS.File.exists(path);
-            return !exist;
-        }
-        return false;
-    }.bind(Zotero.ZotFile));
-
-    this.getAttachmentsOnTablet = Zotero.Promise.coroutine(function* (subfolder) {
+    this.getAttachmentsOnTablet = async function (subfolder) {
         // search for attachments with tag
         var search = new Zotero.Search();
+        search.libraryID = Zotero.Libraries.userLibraryID;
         search.addCondition('itemType', 'is', 'attachment');
-        search.addCondition('tag', 'contains', this.Tablet.tag);
-        // search.addCondition('tag', 'is', this.Tablet.tagMod);
-        var search_results = yield search.search();
+        search.addCondition('tag', 'contains', self.tag);
+        var search_results = await search.search();
         var atts = Zotero.Items.get(search_results)
             .filter(item => item.isAttachment() && !item.isTopLevelItem());
-        // show warning if no information in note
-        if(this.getPref('tablet.showwarning'))
-            atts.filter(att => this.Tablet.getInfo(att, 'mode') === '')
-                .forEach(att => this.infoWindow(this.ZFgetString('general.warning'), this.ZFgetString('tablet.attachmentNoteMissing') + ' (' + att.key + ')'));
+        // show warning if no information is available
+        if(zz.getPref('tablet.showwarning'))
+            atts.filter(att => self.getInfo(att, 'mode') === '')
+                .forEach(att => zz.infoWindow(zz.ZFgetString('general.warning'), zz.ZFgetString('tablet.attachmentNoteMissing') + ' (' + att.key + ')'));
         // return attachments on tablet
-        atts = atts.filter(att => this.Tablet.getInfo(att, 'mode') != '')
-            .filter(att => subfolder === undefined || this.Tablet.getInfo(att, 'projectFolder').toLowerCase() == subfolder.toLowerCase());
-        return atts;
-    }.bind(Zotero.ZotFile));
+        return atts.filter(att => self.getInfo(att, 'mode') !== '')
+            .filter(att => subfolder === undefined || self.getInfo(att, 'projectFolder').toLowerCase() == subfolder.toLowerCase());
+    };
 
-    this.getModifiedAttachmentsOnTablet = Zotero.Promise.coroutine(function* (subfolder) {
-        var atts = yield this.Tablet.getAttachmentsOnTablet(subfolder);
-        atts = yield Zotero.Promise.filter(atts, att => this.Tablet.getTabletStatusModified(att));
-        return atts;
-    }.bind(Zotero.ZotFile));
+    this.getModifiedAttachmentsOnTablet = async function (subfolder) {
+        var atts = await self.getAttachmentsOnTablet(subfolder);
+        return zz.Utils.asyncFilter(atts, att => self.getTabletStatusModified(att));
+    };
 
-    this.setTabletFolder = Zotero.Promise.coroutine(function* (atts, projectFolder) {
+    /**
+     * Move attachments on the tablet to a different subfolder
+     */
+    this.setTabletFolder = async function (atts, projectFolder) {
         projectFolder = typeof projectFolder !== 'undefined' ? projectFolder : '';
-        var tablet_folder = this.Utils.joinPath(this.getPref('tablet.dest_dir'), projectFolder),
-            tablet_subfolder = !this.getPref('import') & this.getPref('tablet.subfolder') ? this.getPref('tablet.subfolderFormat') : '';
+        var tablet_folder = zz.Path.join(zz.getPref('tablet.dest_dir'), projectFolder),
+            tablet_subfolder = zz.getPref('tablet.subfolder') ? zz.getPref('tablet.subfolderFormat') : '';
         atts = atts.filter(att => !att.isTopLevelItem());
         // show infoWindow
-        var loc = (projectFolder !== '') ? ("'..." + projectFolder + "'.") : this.ZFgetString('tablet.baseFolder');
-        var progressWin = this.progressWindow(this.ZFgetString('tablet.movedAttachments', [loc]));
-        // iterature over attachments
-        for (let i = 0; i < atts.length; i++) {
-            let att = atts[i],
-                progress = new progressWin.ItemProgress(att.getImageSrc(), att.getField('title'));
+        var loc = (projectFolder !== '') ? ("'..." + projectFolder + "'.") : zz.ZFgetString('tablet.baseFolder');
+        var progressWin = zz.progressWindow(zz.ZFgetString('tablet.movedAttachments', [loc]));
+        // iterate over attachments
+        for (let att of atts) {
+            let progress = new progressWin.ItemProgress(zz.getIcon(att), att.getField('title'));
             try {
                 let item = Zotero.Items.get(att.parentItemID),
-                    path = yield this.Tablet.getTabletFilePath(att),
-                    folder = this.getLocation(tablet_folder, item, tablet_subfolder),
-                    pathNew = this.Utils.joinPath(folder, OS.Path.basename(path)),
-                    att_mode = this.Tablet.getInfo(att, 'mode');
-                let time_saved  = parseInt(this.Tablet.getInfo(att, 'lastmod'), 10),
-                    time_tablet = path ? Date.parse((yield OS.File.stat(path)).lastModificationDate) : 0;
+                    path = await self.getTabletFilePath(att),
+                    att_mode = self.getInfo(att, 'mode');
+                if (!path) throw new Error('Tablet file not found.');
+                let folder = zz.getLocation(tablet_folder, item, tablet_subfolder),
+                    pathNew = zz.Path.join(folder, zz.Path.basename(path)),
+                    time_saved  = parseInt(self.getInfo(att, 'lastmod'), 10),
+                    time_tablet = await getModificationTime(path);
                 // update tablet folder (background mode)
                 if(att_mode == 1)
-                    yield this.moveFile(path, pathNew);
+                    pathNew = await zz.moveFile(path, pathNew);
                 // update tablet folder (foreground mode)
-                if(att_mode == 2)
-                    yield this.moveLinkedAttachmentFile(att, folder, OS.Path.basename(path), false);
+                if(att_mode == 2) {
+                    await zz.moveLinkedAttachmentFile(att, folder, zz.Path.basename(path));
+                    pathNew = await att.getFilePathAsync();
+                }
                 // update tablet information
-                this.Tablet.addInfo(att, {
-                    'lastmod': time_saved == time_tablet ? Date.parse((yield OS.File.stat(pathNew)).lastModificationDate) : time_saved,
+                self.addInfo(att, {
+                    'lastmod': time_saved == time_tablet ? await getModificationTime(pathNew) : time_saved,
                     'location': pathNew,
                     'projectFolder': projectFolder
                 });
-                yield att.saveTx();
+                await att.saveTx();
                 // update progress window
-                progress.complete(att.attachmentFilename, att.getImageSrc());
+                progress.complete(att.attachmentFilename, zz.getIcon(att));
             }
             catch(e) {
                 progress.setError();
-                this.messages_fatalError.push(e);
+                zz.messages_fatalError.push(e);
             }
         }
         // show messages and handle errors
-        progressWin.startCloseTimer(this.getPref("info_window_duration"));
-        this.handleErrors();
-    }.bind(Zotero.ZotFile));
-
-    this.checkSelectedSearch = function() {
-        // get selected saved search
-        var win = Services.wm.getMostRecentWindow('navigator:browser'),
-            search = win.ZoteroPane.getSelectedSavedSearch();
-        // returns false if no saved search is selected (e.g. collection)
-        if (!search) return false;
-        // check whether saved search 'tablet files (modified)' is selected based on search conditions
-        var conditions = search.getConditions();
-        for (var key in conditions) {
-            var cond = conditions[key];
-            if(cond.condition == 'tag' && [this.Tablet.tag, this.Tablet.tagMod].includes(cond.value))
-                return true;
-        }
-        return false;
-    }.bind(Zotero.ZotFile);
-
-    this.updateModifiedAttachmentsSearch = Zotero.Promise.coroutine(function* () {
-        // update saved search only if 'tablet files (modified)' saved search is selected
-        if(!this.Tablet.checkSelectedSearch()) return;
-        // add tag for modified tablet item and remove tablet tag
-        var atts = yield this.Tablet.getModifiedAttachmentsOnTablet();
-        yield Zotero.DB.executeTransaction(function* () {
-            for (let att of atts) {
-                this.Tablet.addTabletTag(att, this.Tablet.tagMod);
-                yield att.save();
-                yield Zotero.Items.get(att.parentItemID).save();
-            }
-        }.bind(this));
-    }.bind(Zotero.ZotFile));
-
-    this.restrictTabletSearch = Zotero.Promise.coroutine(function* (which) {
-        var win = Services.wm.getMostRecentWindow("navigator:browser"),
-            subfolders = JSON.parse(this.getPref("tablet.subfolders"));
-        // get tablet searches
-        var search_filter = s => s.getConditions()
-            .some(c => c.condition == 'tag' && c.operator != 'isNot' && c.value.indexOf(this.tag) !== -1)
-        var searches = Zotero.Searches.getAll().filter(search_filter);
-        // remove all note related conditions
-        for (let search of searches) {
-            search.getConditions()
-                .filter(c => c.condition == 'note' && c.operator == 'contains')
-                .forEach(c => search.removeCondition(c.id))
-            yield search.saveTx();
-        }
-        // restrict to subfolder or unfiled items (basefolder)
-        var note_contains = which > 0 ? subfolders[which - 1].path : '&quot;projectFolder&quot;:&quot;&quot;';
-        for (let search of searches) {
-            search.addCondition('note', 'contains', note_contains);
-            yield search.saveTx();
-            var win = Services.wm.getMostRecentWindow('navigator:browser');
-            win.ZoteroPane.onCollectionSelected();
-        }
-    }.bind(Zotero.ZotFile));
-
+        progressWin.startCloseTimer(zz.getPref("info_window_duration"));
+        zz.handleErrors();
+    };
 
     /**
-     * Send the selected attachment to tablet folder
-     * @param {Zotero.Item} att            Zotero attachment item
-     * @param {string}      project_folder Subfolder in tablet folder
-     * @param {bool}        verbose        Show progress message
-     * @yield {Zotero.Item}                Zotero attachment item
+     * Is a saved search for tablet files selected?
      */
-    this.sendAttachmentToTablet = Zotero.Promise.coroutine(function* (att, project_folder, verbose) {
+    this.checkSelectedSearch = function() {
+        try {
+            var pane = zz.getMainWindow().ZoteroPane,
+                // Zotero 10 allows to select multiple rows
+                searches = pane.getSelectedSavedSearches
+                    ? pane.getSelectedSavedSearches()
+                    : [pane.getSelectedSavedSearch()];
+            return searches.filter(search => search).some(function(search) {
+                var conditions = search.getConditions();
+                return Object.keys(conditions).some(key => conditions[key].condition == 'tag' &&
+                    [self.tag, self.tagMod].includes(conditions[key].value));
+            });
+        }
+        catch (e) {
+            return false;
+        }
+    };
+
+    /**
+     * Tag attachments that were modified on the tablet (when a tablet saved search is selected)
+     */
+    this.updateModifiedAttachmentsSearch = async function () {
+        try {
+            if (!zz.getPref('tablet') || !self.checkSelectedSearch()) return;
+            // add tag for modified tablet item and remove tablet tag
+            var atts = await self.getModifiedAttachmentsOnTablet();
+            atts = atts.filter(att => !att.hasTag(self.tagMod));
+            if (atts.length == 0) return;
+            await Zotero.DB.executeTransaction(async function () {
+                for (let att of atts) {
+                    self.addTabletTag(att, self.tagMod);
+                    await att.save();
+                    await Zotero.Items.get(att.parentItemID).save();
+                }
+            });
+        }
+        catch (e) {
+            Zotero.logError(e);
+        }
+    };
+
+    // ============== //
+    // SEND TO TABLET //
+    // ============== //
+
+    /**
+     * Send attachment to tablet folder
+     * @param  {Zotero.Item} att            Zotero attachment item
+     * @param  {string}      project_folder Subfolder in tablet folder
+     * @param  {bool}        verbose        Add report message
+     * @return {Zotero.Item}                Zotero attachment item
+     */
+    this.sendAttachmentToTablet = async function (att, project_folder, verbose) {
         verbose = (typeof verbose == 'undefined') ? true : verbose;
+        project_folder = project_folder || '';
         // valid attachment
         if (!att.isAttachment() || att.isTopLevelItem())
-            throw("Zotero.ZotFile.Tablet.sendAttachmentToTablet(): att is not a Zotero attachment");
-        if (!(yield att.fileExists()) || !this.checkFileType(att)) return;
+            throw new Error("Zotero.ZotFile.Tablet.sendAttachmentToTablet(): att is not a Zotero attachment");
+        if (!(await att.fileExists()) || !zz.checkFileType(att)) return att;
         var item = Zotero.Items.get(att.parentItemID),
-            path = att.getFilePath(),
-            tablet_status = this.Tablet.getTabletStatus(att);
+            path = await att.getFilePathAsync(),
+            tablet_status = self.getTabletStatus(att);
         // settings
-        var tablet_mode = this.getPref('tablet.mode'),
-            tablet_rename = this.getPref('tablet.rename'),
-            // OS.Path.join(this.getPref('tablet.dest_dir'), project_folder)
-            tablet_dest = this.Utils.joinPath(this.getPref('tablet.dest_dir'), project_folder),
-            tablet_subfolder = !this.getPref('import') & this.getPref('tablet.subfolder') ? this.getPref('tablet.subfolderFormat') : '';
+        var tablet_mode = zz.getPref('tablet.mode'),
+            tablet_rename = zz.getPref('tablet.rename'),
+            tablet_dest = zz.Path.join(zz.getPref('tablet.dest_dir'), project_folder),
+            tablet_subfolder = zz.getPref('tablet.subfolder') ? zz.getPref('tablet.subfolderFormat') : '';
         // background mode: Rename and Move Attachment
         if (tablet_mode == 1) {
             // change name of attachment file
             if (tablet_rename)  {
-                var filename = this.getFilename(item, att.attachmentFilename);
+                let filename = zz.getFilename(item, att.attachmentFilename);
                 if(filename != att.attachmentFilename) {
-                    yield att.renameAttachmentFile(filename);
+                    await att.renameAttachmentFile(filename);
                     att.setField('title', filename);
-                    yield att.saveTx();
-                    path = att.getFilePath();
+                    await att.saveTx();
+                    path = await att.getFilePathAsync();
                 }
             }
-            // create copy of file on tablet and catch errors
-            var folder = this.getLocation(tablet_dest, item, tablet_subfolder);
-            if (!tablet_status) path = yield this.copyFile(path, folder, att.attachmentFilename);
+            // create copy of file on tablet
+            let folder = zz.getLocation(tablet_dest, item, tablet_subfolder);
+            if (!tablet_status) path = await zz.copyFile(path, folder, att.attachmentFilename);
             if (tablet_status) {
-                var path_tablet = yield this.Tablet.getTabletFilePath(att);
+                let path_tablet = await self.getTabletFilePath(att, false);
                 if(path_tablet) {
-                    path = yield this.moveFile(path_tablet, folder, att.attachmentFilename);
+                    path = await zz.moveFile(path_tablet, folder, att.attachmentFilename);
                 }
+                // file on tablet not found: create a new copy
                 else {
-                    this.infoWindow('ZotFile Warning', 'File on tablet not found. Zotfile is creating a new copy on tablet.');
-                    path = yield this.copyFile(path, folder, att.attachmentFilename);
+                    path = await zz.copyFile(path, folder, att.attachmentFilename);
                 }
             }
         }
         // foreground mode: Rename and Move Attachment
         if(tablet_mode == 2) {
-            att = yield this.renameAttachment(att, false, tablet_rename, tablet_dest, tablet_subfolder, false);
-            path = att.getFilePath();
+            att = await zz.renameAttachment(att, false, tablet_rename, tablet_dest, tablet_subfolder, false);
+            path = await att.getFilePathAsync();
         }
-        // add info to note (date of modification to attachment, location, and mode)
-        this.Tablet.addInfo(att, {
-            'lastmod': Date.parse((yield OS.File.stat(path)).lastModificationDate),
+        // add info (date of modification to attachment, location, and mode)
+        self.addInfo(att, {
+            'lastmod': await getModificationTime(path),
             'mode': tablet_mode,
             'location': path,
             'projectFolder': project_folder
         });
         // add tags
         if (!tablet_status) {
-            this.Tablet.addTabletTag(att, this.Tablet.tag);
-            if (this.getPref('tablet.tagParentPush')) item.addTag(this.getPref('tablet.tagParentPush_tag'));
-            yield item.saveTx();
+            self.addTabletTag(att, self.tag);
+            if (zz.getPref('tablet.tagParentPush')) item.addTag(zz.getPref('tablet.tagParentPush_tag'));
+            await item.saveTx();
         }
-        yield att.saveTx();
+        await att.saveTx();
         // notification
-        if(verbose) this.messages_report.push("'" + OS.Path.basename(path) + "'");
+        if(verbose) zz.messages_report.push("'" + zz.Path.basename(path) + "'");
         return att;
-    }.bind(Zotero.ZotFile));
+    };
 
     /**
      * Send selected Zotero attachments to tablet
-     * @param {int} idx_subfolder  Index of subfolder
-     * @yield {void}
+     * @param  {string} project_folder Subfolder in tablet folder (optional)
+     * @return {void}
      */
-    this.sendSelectedAttachmentsToTablet = Zotero.Promise.coroutine(function* (idx_subfolder) {
-        // get selected attachments
-        var atts = Zotero.Items.get(this.getSelectedAttachments())
-            .filter(this.checkFileType);
-        // get project folder
-        var project_folder = '';
-        if (idx_subfolder !== undefined) {
-            if(this.getPref('tablet.projectFolders') == 1)
-                project_folder = this.projectPath[idx_subfolder];
-            if(this.getPref('tablet.projectFolders') == 2) {
-                var subfolders = JSON.parse(this.getPref('tablet.subfolders'));
-                project_folder = subfolders[idx_subfolder].path;
+    this.sendSelectedAttachmentsToTablet = async function (project_folder) {
+        try {
+            project_folder = project_folder || '';
+            // get selected attachments
+            var atts = Zotero.Items.get(zz.getSelectedAttachments())
+                .filter(zz.checkFileType);
+            // confirm
+            var atts_tablet = await zz.Utils.asyncFilter(atts, async att =>
+                    self.getTabletStatus(att) && (await self.getTabletFilePath(att, false))),
+                pref_repush = !zz.getPref('tablet.confirmRepush');
+            if (zz.getPref('confirmation_batch_ask') && atts.length >= zz.getPref('confirmation_batch'))
+                if(!zz.confirm(zz.ZFgetString('tablet.sendAttachments', [atts.length]))) return;
+            if (!pref_repush && (atts_tablet.length > 0))
+                pref_repush = zz.confirm(zz.ZFgetString('tablet.replaceAttachAlready', [atts_tablet.length]));
+            // show infoWindow
+            var progressWin = zz.progressWindow(zz.ZFgetString('tablet.AttsMoved')),
+                description = atts.length == 0;
+            // iterate through attachments
+            for (let att of atts) {
+                let path_tablet = await self.getTabletFilePath(att, false);
+                if(self.getTabletStatus(att) && path_tablet && !pref_repush) {
+                    description = true;
+                    continue;
+                }
+                // get attachment and add line to infoWindow
+                let att_mode = self.getInfo(att, 'mode'),
+                    progress = new progressWin.ItemProgress(zz.getIcon(att), att.getField('title'));
+                // check attachment
+                if (!(await att.fileExists()) || att.isTopLevelItem()) {
+                    description = true;
+                    progress.setError();
+                    continue;
+                }
+                try {
+                    // First remove from tablet if mode has changed or tablet file was moved
+                    if(self.getTabletStatus(att) && (att_mode != zz.getPref('tablet.mode') || !path_tablet))
+                        att = await self.getAttachmentFromTablet(att, true);
+                    // send to tablet
+                    att = await self.sendAttachmentToTablet(att, project_folder, false);
+                    // update progress window
+                    progress.complete(att.attachmentFilename, zz.getIcon(att));
+                }
+                catch (e) {
+                    progress.setError();
+                    zz.messages_fatalError.push(e);
+                }
             }
+            // show messages and handle errors
+            zz.messages_report = [];
+            if(description) progressWin.addDescription(zz.ZFgetString('general.warning.skippedAtt.msg'));
+            progressWin.startCloseTimer(zz.getPref('info_window_duration'));
+            zz.handleErrors();
         }
-        // confirm
-        var atts_tablet = yield Zotero.Promise.filter(atts, att =>
-                this.Tablet.getTabletStatus(att) && this.Tablet.getTabletFilePath(att, false)),
-            pref_repush = !this.getPref('tablet.confirmRepush');
-        if (this.getPref('confirmation_batch_ask') && atts.length >= this.getPref('confirmation_batch'))
-            if(!confirm(this.ZFgetString('tablet.sendAttachments', [atts.length]))) return;
-        if (!pref_repush && (atts_tablet.length > 0))
-            pref_repush = confirm(this.ZFgetString('tablet.replaceAttachAlready', [atts_tablet.length]));
-        // show infoWindow
-        var progressWin = this.progressWindow(this.ZFgetString('tablet.AttsMoved')),
-            description = atts.length == 0 || atts_tablet == atts.length;
-        // iterate through attachments
-        for (let i = 0; i < atts.length; i++) {
-            var att = atts[i],
-                path_tablet = yield this.Tablet.getTabletFilePath(att, false);
-            if(this.Tablet.getTabletStatus(att) && path_tablet && !pref_repush) continue;
-            // get attachment and add line to infoWindow
-            var att_mode = this.Tablet.getInfo(att, 'mode'),
-                progress = new progressWin.ItemProgress(att.getImageSrc(), att.getField('title'));
-            // check attachment
-            if (!(yield att.fileExists()) || att.isTopLevelItem()) {
-                description = true;
-                progress.setError();
-                continue;
-            }
-            // First remove from tablet if mode has changed or tablet file was moved
-            if(this.Tablet.getTabletStatus(att) && (att_mode != this.getPref('tablet.mode') || !path_tablet))
-                att = yield this.Tablet.getAttachmentFromTablet(att, true);
-            // send to tablet
-            att = yield this.Tablet.sendAttachmentToTablet(att, project_folder, false);
-            // update progress window
-            progress.complete(att.attachmentFilename, att.getImageSrc());
+        catch (e) {
+            zz.messages_fatalError.push(e);
+            zz.handleErrors();
         }
-        // show messages and handle errors
-        if(description) progressWin.addDescription(this.ZFgetString('general.warning.skippedAtt.msg'));
-        progressWin.startCloseTimer(this.getPref('info_window_duration'));
-    }.bind(Zotero.ZotFile));
+    };
 
-    this.updateSelectedTabletAttachments = Zotero.Promise.coroutine(function* () {
-        // get selected attachments, filter for tablet
-        var atts = Zotero.Items.get(this.getSelectedAttachments())
-            .filter(this.Tablet.getTabletStatus)
-            .filter(this.checkFileType);
-        // show notification
-        var progressWin = this.progressWindow('ZotFile: Update Modification Time'),
-            description = atts.length == 0;
-        // iterate through selected attachments
-        for (let i = 0; i < atts.length; i++) {
-            var att = atts[i],
-                item = Zotero.Items.get(att.parentItemID),
-                path = yield this.Tablet.getTabletFilePath(att),
-                progress = new progressWin.ItemProgress(att.getImageSrc(), att.getField('title')),
-                att_mode = this.Tablet.getInfo(att, 'mode');
-            if(!path || att.isTopLevelItem()) {
-                description = true;
-                progress.setError();
-                continue;
+    /**
+     * Update modification time and file in Zotero for the selected attachments on the tablet
+     */
+    this.updateSelectedTabletAttachments = async function () {
+        try {
+            // get selected attachments, filter for tablet
+            var atts = Zotero.Items.get(zz.getSelectedAttachments())
+                .filter(self.getTabletStatus)
+                .filter(zz.checkFileType);
+            // show notification
+            var progressWin = zz.progressWindow('ZotFile: Update Modification Time'),
+                description = atts.length == 0;
+            // iterate through selected attachments
+            for (let att of atts) {
+                let item = Zotero.Items.get(att.parentItemID),
+                    path = await self.getTabletFilePath(att),
+                    progress = new progressWin.ItemProgress(zz.getIcon(att), att.getField('title')),
+                    att_mode = self.getInfo(att, 'mode');
+                if(!path || att.isTopLevelItem()) {
+                    description = true;
+                    progress.setError();
+                    continue;
+                }
+                try {
+                    if (await self.getTabletStatusModified(att)) {
+                        // update status (foreground mode)
+                        if(att_mode == 2) {
+                            self.addInfo(att, {'lastmod': await getModificationTime(path)});
+                            self.addTabletTag(att, self.tag);
+                            await att.saveTx();
+                            await item.saveTx();
+                        }
+                        // update status (background mode)
+                        if(att_mode == 1) {
+                            let project_folder = self.getInfo(att, 'projectFolder');
+                            // first get from tablet
+                            att = await self.getAttachmentFromTablet(att, true);
+                            // now send back to reader
+                            att = await self.sendAttachmentToTablet(att, project_folder, false);
+                        }
+                    }
+                    // update progress window
+                    progress.complete(att.attachmentFilename, zz.getIcon(att));
+                }
+                catch (e) {
+                    progress.setError();
+                    zz.messages_fatalError.push(e);
+                }
             }
-            if (!(yield this.Tablet.getTabletStatusModified(att))) {
-                progress.complete(att.attachmentFilename, att.getImageSrc());
-                continue;
-            }
-            // update status (foreground mode)
-            if(att_mode == 2) {
-                let lastModificationDate = Date.parse((yield OS.File.stat(path)).lastModificationDate);
-                this.Tablet.addInfo(att, {'lastmod': lastModificationDate});
-                this.Tablet.addTabletTag(att, this.Tablet.tag);
-                yield att.saveTx();
-                yield item.saveTx();
-            }
-            // update status (background mode)
-            if(att_mode == 1) {
-                var project_folder = this.Tablet.getInfo(att, 'projectFolder');
-                // first get from tablet
-                att = yield this.Tablet.getAttachmentFromTablet(att, true);
-                // now send back to reader
-                att = yield this.Tablet.sendAttachmentToTablet(att, project_folder, false);
-            }
-            // extract annotations
-            if (this.getPref('tablet.updateExtractAnnotations'))
-                this.pdfAnnotations.getAnnotations([att.id]);
-            // update progress window
-            progress.complete(att.attachmentFilename, att.getImageSrc());
+            // show messages and handle errors
+            zz.messages_report = [];
+            if(description) progressWin.addDescription(zz.ZFgetString('general.warning.skippedAtt.msg'));
+            progressWin.startCloseTimer(zz.getPref('info_window_duration'));
+            zz.handleErrors();
         }
-        // show messages and handle errors
-        if(description) progressWin.addDescription(this.ZFgetString('general.warning.skippedAtt.msg'));
-        progressWin.startCloseTimer(this.getPref('info_window_duration'));
-    }.bind(Zotero.ZotFile));
+        catch (e) {
+            zz.messages_fatalError.push(e);
+            zz.handleErrors();
+        }
+    };
 
-    this.getLastModifiedTabletFile = Zotero.Promise.coroutine(function* (att) {
-        // foreground mode
-        if (this.Tablet.getInfo(att, 'mode') == 2)
-            return yield att.getFilePathAsync();
-        // background mode
-        var path_zotero = yield att.getFilePathAsync(),
-            path_tablet = yield this.Tablet.getTabletFilePath(att);
-        // get times
-        var time_tablet = path_tablet ? Date.parse((yield OS.File.stat(path_tablet)).lastModificationDate) : 0,
-            time_saved  = parseInt(this.Tablet.getInfo(att, 'lastmod'), 10),
-            time_zotero = path_zotero ? Date.parse((yield OS.File.stat(path_zotero)).lastModificationDate) : 0;
-        if (time_tablet == 0 && time_zotero == 0)
-            return false;
-        // set options
-        var tablet_status = undefined;
-        if (time_tablet > time_saved  && time_zotero <= time_saved) tablet_status = 0;
-        if (time_tablet <= time_saved && time_zotero <= time_saved) tablet_status = 2;
-        if (time_tablet <= time_saved && time_zotero > time_saved) tablet_status = 2;
-        if (time_tablet > time_saved  && time_zotero > time_saved) tablet_status = 1;
-        // prompt if both file have been modified
-        if(tablet_status == 1) tablet_status = this.promptUser(
-            this.ZFgetString('extraction.fileConflict',
-            [OS.Path.basename(path_zotero)]),
-            this.ZFgetString('extraction.fileConflict.useT'),
-            this.ZFgetString('general.cancel'),
-            this.ZFgetString('extraction.fileConflict.useZ'));
-        if(tablet_status == 0) return path_tablet;
-        if(tablet_status == 2) return path_zotero;
-        if(tablet_status == 1) return false;
-    }.bind(Zotero.ZotFile));
+    // =============== //
+    // GET FROM TABLET //
+    // =============== //
 
-    this.getAttachmentFromTablet = Zotero.Promise.coroutine(function* (att, fake_remove) {
+    /**
+     * Get attachment from tablet
+     * @param  {Zotero.Item} att         Zotero attachment item
+     * @param  {bool}        fake_remove Keep tablet tag and information (the attachment is sent again right away)
+     * @return {Zotero.Item}             Zotero attachment item
+     */
+    this.getAttachmentFromTablet = async function (att, fake_remove) {
         var item = Zotero.Items.get(att.parentItemID),
-            tablet_status = 1, 
+            tablet_status = 1,
             item_pulled = false,
             att_deleted = false,
-            att_mode = this.Tablet.getInfo(att, 'mode'),
-            attSubfolder = this.Tablet.getInfo(att, 'projectFolder').trim();
+            att_mode = self.getInfo(att, 'mode'),
+            attSubfolder = String(self.getInfo(att, 'projectFolder')).trim();
         // get files
-        var path_zotero = yield att.getFilePathAsync(),
-            path_tablet = yield this.Tablet.getTabletFilePath(att, false);
-        if (path_tablet === false) {
+        var path_zotero = await att.getFilePathAsync(),
+            path_tablet = await self.getTabletFilePath(att, false);
+        if (!path_tablet) {
             // clear tablet tag and info from att and parent item
-            this.Tablet.removeTabletTag(att, this.Tablet.tag);
-            this.Tablet.clearInfo(att);
-            yield att.saveTx();
-            yield item.saveTx();
+            self.removeTabletTag(att, self.tag);
+            self.removeTabletTag(att, self.tagMod);
+            self.clearInfo(att);
+            await att.saveTx();
+            await item.saveTx();
             if (!fake_remove)
-                this.infoWindow('ZotFile Warning', 'The tablet file "' + att.attachmentFilename + '" was manually moved and does not exist.');
+                zz.infoWindow('ZotFile Warning', 'The tablet file "' + att.attachmentFilename + '" was manually moved and does not exist.');
             return att;
         }
-        var tablet_folder = OS.Path.dirname(path_tablet);
+        var tablet_folder = zz.Path.dirname(path_tablet);
         // get modification times for files
-        var time_tablet = path_tablet ? Date.parse((yield OS.File.stat(path_tablet)).lastModificationDate) : 0,
-            time_saved  = parseInt(this.Tablet.getInfo(att, 'lastmod'), 10),
-            time_zotero = path_zotero ? Date.parse((yield OS.File.stat(path_zotero)).lastModificationDate) : 0;
+        var time_tablet = await getModificationTime(path_tablet),
+            time_saved  = parseInt(self.getInfo(att, 'lastmod'), 10),
+            time_zotero = path_zotero ? await getModificationTime(path_zotero) : 0;
         // background mode
-        if(att_mode == 1 && (time_tablet != 0 || time_zotero != 0)) {
+        if(att_mode == 1) {
+            if (!path_zotero) throw new Error("The file of the attachment '" + att.getField('title') + "' does not exist in Zotero.");
             // set options
             if (time_tablet > time_saved  && time_zotero <= time_saved) tablet_status = 0;
             if (time_tablet <= time_saved && time_zotero <= time_saved) tablet_status = 2;
             if (time_tablet <= time_saved && time_zotero > time_saved) tablet_status = 2;
             if (time_tablet > time_saved  && time_zotero > time_saved) tablet_status = 1;
             // if attachment gets replaced
-            if (!this.getPref('tablet.storeCopyOfFile')) {
+            if (!zz.getPref('tablet.storeCopyOfFile')) {
                 // prompt if both file have been modified
                 if (tablet_status == 1) {
-                    tablet_status = this.promptUser(this.ZFgetString('tablet.fileConflict', [att.attachmentFilename]),
-                        this.ZFgetString('tablet.fileConflict.replaceZ'),
-                        this.ZFgetString('general.cancel'),
-                        this.ZFgetString('tablet.fileConflict.removeT'));
-                    //att_deleted is true to display a special message when the attachments have been deleted from tablet without being sent back to Zotero
+                    tablet_status = zz.promptUser(zz.ZFgetString('tablet.fileConflict', [att.attachmentFilename]),
+                        zz.ZFgetString('tablet.fileConflict.replaceZ'),
+                        zz.ZFgetString('general.cancel'),
+                        zz.ZFgetString('tablet.fileConflict.removeT'));
+                    // att_deleted is true to display a special message when the tablet file is removed without being sent back to Zotero
                     if (tablet_status == 2) att_deleted = true;
                 }
                 // replace zotero file
                 if(tablet_status == 0) {
-                    yield OS.File.move(path_tablet, path_zotero);
+                    await IOUtils.move(path_tablet, path_zotero);
                     item_pulled = true;
                 }
             }
-            // if saving a copy of the file as a new attachment with suffix and reader file was modified
-            if (this.getPref('tablet.storeCopyOfFile') && tablet_status != 2)  {
-                var filename = this.Utils.addSuffix(OS.Path.basename(path_zotero), this.getPref('tablet.storeCopyOfFile_suffix'));
-                //add linked attachment
-                if (item.library.libraryType == 'user' && !this.getPref('import')) {
-                    let path_copied = OS.Path.join(OS.Path.dirname(path_zotero), filename);
-                    yield OS.File.move(path_tablet, path_copied);
-                    var options = {file: path_copied, libraryID: item.libraryID, parentItemID: item.id, collections: undefined};
-                    att_new = yield Zotero.Attachments.linkFromFile(options);
+            // if saving a copy of the file as a new attachment with suffix and tablet file was modified
+            if (zz.getPref('tablet.storeCopyOfFile') && tablet_status != 2)  {
+                let filename = zz.Utils.addSuffix(zz.Path.basename(path_zotero), zz.getPref('tablet.storeCopyOfFile_suffix'));
+                zz.excludeAutorenameKeys.push(item.key);
+                // add linked attachment
+                if (item.library.libraryType == 'user' && !zz.getPref('import')) {
+                    let path_copied = await zz.moveFile(path_tablet, zz.Path.dirname(path_zotero), filename);
+                    await Zotero.Attachments.linkFromFile({file: path_copied, libraryID: item.libraryID, parentItemID: item.id, collections: undefined});
                     item_pulled = true;
-                    // extract annotations from attachment and add note
-                    if (this.getPref('pdfExtraction.Pull'))
-                        this.Tablet.extractPdfs.push(att_new.id);
                 }
-                //imports attachment
-                if (item.library.libraryType != 'user' || this.getPref('import')) {
-                    // import file on reader
-                    var options = {file: path_tablet, libraryID: item.libraryID, parentItemID: item.id, collections: undefined};
-                    att_new = yield Zotero.Attachments.importFromFile(options);
+                // imports attachment
+                else {
+                    let att_new = await Zotero.Attachments.importFromFile({file: path_tablet, libraryID: item.libraryID, parentItemID: item.id, collections: undefined});
                     // rename file associated with attachment
-                    yield att_new.renameAttachmentFile(filename);
+                    await att_new.renameAttachmentFile(filename);
                     // change title of attachment item
                     att_new.setField('title', filename);
-                    yield att_new.saveTx();
-                    // remove file on reader
-                    yield OS.File.remove(path_tablet);
+                    await att_new.saveTx();
+                    // remove file on tablet
+                    await IOUtils.remove(path_tablet, {ignoreAbsent: true});
                     item_pulled = true;
-                    // extract annotations from attachment and add note
-                    if (this.getPref('pdfExtraction.Pull'))
-                        this.Tablet.extractPdfs.push(att_new.id);
                 }
             }
             // Pull without replacement (i.e. remove file on tablet)
             if(tablet_status == 2) {
-                yield OS.File.remove(path_tablet);
+                await IOUtils.remove(path_tablet, {ignoreAbsent: true});
                 item_pulled = true;
             }
         }
         // foreground mode
         if(att_mode == 2) {
-            // add parent key to array for excluded items from auto rename
-            this.excludeAutorenameKeys.push(item.key);
-            // get note content
-            var note = att.getNote();
             // rename and move attachment
-            var subfolder = !this.getPref('import') & this.getPref('subfolder') ? this.getPref('subfolderFormat') : '';
-            att = yield this.renameAttachment(att, this.getPref('import'), this.getPref('tablet.rename'),
-                            this.getPref('dest_dir'), subfolder, false);
+            let subfolder = !zz.getPref('import') && zz.getPref('subfolder') ? zz.getPref('subfolderFormat') : '';
+            att = await zz.renameAttachment(att, zz.getPref('import'), zz.getPref('tablet.rename'),
+                            zz.getPref('dest_dir'), subfolder, false);
             // finish up
             item_pulled = true;
             tablet_status = time_zotero > time_saved ? 0 : 2;
-            // add note content
-            att.setNote(note);
-            yield att.saveTx();
         }
         // remove subfolder if empty
-        if (attSubfolder != "" && tablet_folder != OS.Path.normalize(this.getPref('tablet.dest_dir')))
-            this.removeFile(tablet_folder);
+        if (attSubfolder != "" && tablet_folder != zz.Path.normalize(zz.getPref('tablet.dest_dir')))
+            zz.removeFile(tablet_folder);
         // post-processing if attachment has been removed & it's not a fake-pull
         if (item_pulled && !fake_remove) {
             // remove tag from attachment and parent item
-            this.Tablet.removeTabletTag(att, this.Tablet.tag);
-            // clear attachment note
-            this.Tablet.clearInfo(att);
-            // extract annotations from attachment and add note
-            if (this.getPref('pdfExtraction.Pull') && tablet_status != 2 && !this.getPref('tablet.storeCopyOfFile'))
-                this.Tablet.extractPdfs.push(att.id);
+            self.removeTabletTag(att, self.tag);
+            // clear tablet information
+            self.clearInfo(att);
             // remove tag from parent item
-            var tag_parent = this.getPref('tablet.tagParentPush_tag');
+            let tag_parent = zz.getPref('tablet.tagParentPush_tag');
             if(item.hasTag(tag_parent)) item.removeTag(tag_parent);
             // add tag to parent item
-            if (this.getPref('tablet.tagParentPull'))
-                item.addTag(this.getPref('tablet.tagParentPull_tag'));
-            // notification (display a different message when the attachments have been deleted from tablet without being sent back to Zotero)
-            var message = "'" + att.attachmentFilename + "' " + (att_deleted ? this.ZFgetString('tablet.attsDel') : '');
-            this.messages_report.push(message);
+            if (zz.getPref('tablet.tagParentPull'))
+                item.addTag(zz.getPref('tablet.tagParentPull_tag'));
+            // notification (different message if the tablet file was removed without being sent back to Zotero)
+            zz.messages_report.push("'" + att.attachmentFilename + "' " + (att_deleted ? zz.ZFgetString('tablet.attsDel') : ''));
         }
         // remove modified tag from attachment
-        if (item_pulled) this.Tablet.removeTabletTag(att, this.Tablet.tagMod);
-        yield att.saveTx();
-        yield item.saveTx();
-        // return new id
+        if (item_pulled) self.removeTabletTag(att, self.tagMod);
+        await att.saveTx();
+        await item.saveTx();
         return att;
-    }.bind(Zotero.ZotFile));
-}
+    };
+
+    this.getSelectedAttachmentsFromTablet = async function () {
+        try {
+            // get selected attachments, filter for tablet
+            var atts = Zotero.Items.get(zz.getSelectedAttachments())
+                .filter(self.getTabletStatus)
+                .filter(zz.checkFileType);
+            // confirm
+            if (zz.getPref("confirmation_batch_ask") && atts.length >= zz.getPref("confirmation_batch"))
+                if(!zz.confirm(zz.ZFgetString('tablet.getAttachments', [atts.length])))
+                    return;
+            // show notification
+            var progressWin = zz.progressWindow(zz.ZFgetString('tablet.AttsGot')),
+                description = atts.length == 0;
+            // iterate through attachments
+            for (let att of atts) {
+                let progress = new progressWin.ItemProgress(zz.getIcon(att), att.getField('title'));
+                // check attachment
+                if(att.isTopLevelItem()) {
+                    description = true;
+                    progress.setError();
+                    continue;
+                }
+                try {
+                    // get attachment from tablet
+                    att = await self.getAttachmentFromTablet(att, false);
+                    // update progress window
+                    progress.complete(att.attachmentFilename, zz.getIcon(att));
+                }
+                catch (e) {
+                    progress.setError();
+                    zz.messages_fatalError.push(e);
+                }
+            }
+            // show messages and handle errors
+            zz.messages_report = [];
+            if(description) progressWin.addDescription(zz.ZFgetString('general.warning.skippedAtt.msg'));
+            progressWin.startCloseTimer(zz.getPref("info_window_duration"));
+            zz.handleErrors();
+        }
+        catch (e) {
+            zz.messages_fatalError.push(e);
+            zz.handleErrors();
+        }
+    };
+};

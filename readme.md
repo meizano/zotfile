@@ -5,32 +5,29 @@ Zotfile is a Zotero plugin to manage your attachments: automatically rename, mov
 
 Detailed information are available from the [zotfile website](http://www.zotfile.com).
 
+## Zotero 8, 9 and 10
+
+Version 6.0.0 of this fork is a port to the bootstrapped plugin format required by recent Zotero versions (tested with Zotero 10.0.8). It includes attaching new files from a source folder, renaming and moving attachments (stored or linked, with wildcard-based subfolders), automatic renaming of new attachments, sending files to and getting them back from a tablet folder (background and foreground mode, custom or collection-based subfolders, saved searches for tablet files), and the settings pane (Settings -> ZotFile).
+
+Information about files on the tablet is now stored in `zotfile-tablet.json` in the Zotero data directory instead of the attachment note. Data saved in notes by older versions is still read and moved to the new file the next time the attachment changes.
+
+Not included in this version: extraction of PDF annotations and of the table of contents (also when getting files back from the tablet). Zotero's built-in PDF reader covers annotations and outlines.
+
+Build with `python build.py`, then install `zotfile-6.0.0.xpi` in Zotero via "Tools -> Plugins -> gear icon -> Install Plugin From File". If you use ZotFile's automatic renaming, turn off Zotero's own "Automatically rename locally added files" setting to avoid both renaming the same file.
+
 ## Development status
 
 Zotfile is currently not actively developed and maintained! Updates are extremely rare and I will mostly not respond to issues and pull requests here on github.
 
 ## Installation
 
-For *Zotero 5*, first download the extension file (follow the download link above, click on the .xpi file for the most recent release). Now start Zotero 5 and go to "Tool -> Add-ons -> Tools for all Add-ons (the small, drop-down wheel in the top right corner) -> Install Add-on From File" and select the downloaded .xpi file. For *Zotero 4.x*, the process is different for Zotero for Firefox and Zotero Standalone. For Zotero 4.x Firefox, go to the [Mozilla Add-Ons page](https://addons.mozilla.org/en-us/firefox/addon/zotfile/) and follow the instructions. For Zotero 4.x Standalone, use the same steps as for Zotero 5 but download the .xpi file from [here](https://addons.mozilla.org/firefox/downloads/file/585224/zotfile-4.2.8-fx.xpi?src=dp-btn-primary)
+Version 6.0.0 requires **Zotero 8 or later** (tested with Zotero 10.0.8). Build the extension with `python build.py` (or `make`), then install the resulting `zotfile-6.0.0.xpi` in Zotero via "Tools -> Plugins -> gear icon -> Install Plugin From File".
 
-To install the **development version** on github:
+To install the **development version** from github:
 
-1. download `.zip` file from github
-2. extract `.zip` file
-3. recreate `.zip` file containing all the files at the top level, i.e.,
-  install.rdf and the chrome directory need to be at the root of the .zip file
-  and not under zotfile/
-4. rename the file to `.xpi`
-5. Install
-  - For zotero firefox: drag & drop on firefox
-  - For zotero standalone: In Zotero Standalone go to 'Tools->Add-ons->Tools for all Add-ons (the small, drop-down wheel menu next to the 'Search all Add-ons' box)->Install Add-on From File' and pick the .xpi file.
-
-For Linux, Mac OS X or Cygwin users, there is a `Makefile` which takes care of creating the `.xpi` file.
-Simply run `make` instead of steps 3 and 4 above.
-
-## Extraction of PDF Annotations
-
-Zotfile can extracted annotations and highlighted text from many PDF files. But it will never be able to handle all files. If you can not copy & paste meaningful text from the file in your pdf viewer (open your pdf viewer (not the browser plugin), select text, copy and paste it somewhere), zotfile won't be able to extract the highlighted text either. If you can, there is a chance that future versions of zotfile will solve the problem. In general, these files depend on the pdf standards supported by pdf.js, which is the pdf library used by zotfile to extract annotations.
+1. download `.zip` file from github and extract it
+2. run `python build.py` to create the `.xpi` file (requires `manifest.json`, `bootstrap.js`, `prefs.js` and the `chrome` directory at the top level)
+3. In Zotero go to 'Tools -> Plugins -> gear icon -> Install Plugin From File' and pick the `.xpi` file.
 
 ## License
 The source code is released under GNU General Public License, version 3.0
