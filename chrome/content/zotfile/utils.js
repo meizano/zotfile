@@ -7,14 +7,91 @@ Zotero.ZotFile.Path = new function() {
 
     var sep = Zotero.isWin ? '\\' : '/';
 
+    // current platform key used in the path mappings
+    var platform = Zotero.isWin ? 'windows' : Zotero.isMac ? 'mac' : 'linux';
+
+    // cache for the parsed 'pathMappings' preference
+    var _mappingsCache = { pref: null, rules: [] };
+
+    var getMappings = function() {
+        var pref = Zotero.Prefs.get('extensions.zotfile.pathMappings', true) || '[]';
+        if (_mappingsCache.pref !== pref) {
+            try {
+                var rules = JSON.parse(pref);
+                _mappingsCache = { pref: pref, rules: Array.isArray(rules) ? rules.filter(rule => rule && typeof rule == 'object') : [] };
+            }
+            catch (e) {
+                _mappingsCache = { pref: pref, rules: [] };
+            }
+        }
+        return _mappingsCache.rules;
+    };
+
+    // canonical form for prefix comparison: forward slashes, no trailing
+    // separator, lowercased for case-insensitive file systems
+    var canonical = function(path, caseInsensitive) {
+        path = String(path).replace(/\\/g, '/').replace(/\/+$/, '');
+        return caseInsensitive ? path.toLowerCase() : path;
+    };
+
+    // windows-style prefixes (drive letter, UNC path) are case-insensitive
+    var isWindowsPrefix = function(path) {
+        return /^[A-Za-z]:/.test(path) || String(path).startsWith('//');
+    };
+
     /**
-     * Normalize path: use the platform separator, remove duplicate and trailing
-     * separators, and resolve '.' and '..'
+     * Map a path to the current platform based on the 'pathMappings' preference.
+     * The preference holds a JSON array of rules such as
+     *     [{"windows": "G:\\My Drive", "linux": "/home/user/GDrive"}]
+     * The folder before and after mapping has to point to the same location.
+     * Paths already using the current platform's prefix are left unchanged.
+     * @param  {string} path Path to map
+     * @return {string}      Mapped path (unchanged if no rule matches)
+     */
+    this.map = function(path) {
+        path = String(path);
+        var rules = getMappings();
+        if (rules.length === 0) return path;
+        // canonical form of the path without lowercasing (length is preserved
+        // for slicing) and without trailing separators
+        var pathCanon = path.replace(/\\/g, '/');
+        var pathCompare = Zotero.isWin ? pathCanon.toLowerCase() : pathCanon;
+        // no mapping needed if the path already starts with the prefix of the current platform
+        for (let rule of rules) {
+            let own = rule[platform];
+            if (!own) continue;
+            let ownCanon = canonical(own, Zotero.isWin);
+            if (pathCompare === ownCanon || pathCompare.startsWith(ownCanon + '/'))
+                return path;
+        }
+        // otherwise, map from the prefix of another platform
+        for (let rule of rules) {
+            for (let os in rule) {
+                let prefix = rule[os];
+                if (os === platform || !prefix) continue;
+                // windows-style prefixes (drive letter, UNC path) are matched case-insensitively
+                let ci = isWindowsPrefix(prefix);
+                let prefixCanon = canonical(prefix, ci);
+                let prefixCompare = ci ? prefixCanon.toLowerCase() : prefixCanon;
+                let pathCmp = ci ? pathCompare.toLowerCase() : pathCompare;
+                if (pathCmp !== prefixCompare && !pathCmp.startsWith(prefixCompare + '/'))
+                    continue;
+                let mapped = rule[platform];
+                if (!mapped) return path;
+                return String(mapped).replace(/[\\/]+$/, '') + pathCanon.slice(prefixCanon.length).replace(/\//g, sep);
+            }
+        }
+        return path;
+    };
+
+    /**
+     * Normalize path: map to the current platform, use the platform separator,
+     * remove duplicate and trailing separators, and resolve '.' and '..'
      * @param  {string} path Path (absolute or relative)
      * @return {string}      Normalized path
      */
     this.normalize = function(path) {
-        path = String(path).trim();
+        path = this.map(String(path)).trim();
         var prefix = '', absolute = false;
         if (Zotero.isWin) {
             path = path.replace(/\//g, '\\');

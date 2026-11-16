@@ -118,6 +118,8 @@ Zotero.ZotFile.Tablet = new function() {
             // for location and projectFolder tag: correct window/mac file system
             if(['location', 'projectFolder'].includes(key) && Zotero.isWin) value = value.replace(/\//g, '\\');
             if(['location', 'projectFolder'].includes(key) && !Zotero.isWin) value = value.replace(/\\/g, '/');
+            // map to the path of the current operating system
+            if(['location', 'projectFolder'].includes(key)) value = zz.Path.map(value);
             return value;
         }
         catch (err) {

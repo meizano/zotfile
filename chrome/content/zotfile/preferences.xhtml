@@ -171,5 +171,17 @@
 			<checkbox data-zf="work-with-following-filetypes" data-pref="useFileTypes" native="true"/>
 			<html:input type="text" data-pref="filetypes" data-enable="useFileTypes" style="flex: 1"/>
 		</hbox>
+		<separator class="thin"/>
+
+		<label data-zf="os-path-mappings"/>
+		<description data-zf="os-path-mappings-desc" style="font-size: 0.9em"/>
+		<hbox class="indented-pref" align="start">
+			<html:select id="zotfile-pathMappings" size="4" style="flex: 1; min-width: 0"/>
+			<vbox>
+				<button id="zotfile-pathMappings-add" label="+"/>
+				<button id="zotfile-pathMappings-edit" data-zf="edit-mapping"/>
+				<button id="zotfile-pathMappings-delete" data-zf="delete-mapping"/>
+			</vbox>
+		</hbox>
 	</groupbox>
 </vbox>

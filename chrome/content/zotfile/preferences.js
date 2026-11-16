@@ -341,6 +341,84 @@
         $('zotfile-tablet-search-modified').addEventListener('command', () => zz.Tablet.createSavedSearch('tablet_modified'));
     };
 
+    // ================== //
+    // OS PATH MAPPINGS   //
+    // ================== //
+
+    var getMappings = function () {
+        try {
+            var mappings = JSON.parse(zz.getPref('pathMappings'));
+            return Array.isArray(mappings) ? mappings : [];
+        }
+        catch (e) {
+            return [];
+        }
+    };
+
+    /**
+     * Save mappings and show them in the list
+     */
+    var setMappings = function (mappings, select) {
+        zz.setPref('pathMappings', JSON.stringify(mappings));
+        var list = $('zotfile-pathMappings');
+        while (list.firstChild) list.firstChild.remove();
+        for (let mapping of mappings) {
+            let option = document.createElementNS('http://www.w3.org/1999/xhtml', 'option');
+            option.textContent = (mapping.windows || '?') + '  \u21C4  ' + (mapping.linux || '?');
+            list.appendChild(option);
+        }
+        if (select !== undefined && select >= 0 && select < mappings.length) list.selectedIndex = select;
+    };
+
+    /**
+     * Ask the user for the Windows and Linux path of the same folder
+     * @return {object} Object with windows and linux paths or null if canceled
+     */
+    var promptMapping = function (mapping) {
+        var windowsPath = {value: mapping ? mapping.windows || '' : ''},
+            linuxPath = {value: mapping ? mapping.linux || '' : ''};
+        if (!Services.prompt.prompt(window, 'ZotFile', zz.ZFgetString('ui.osPathMappings.windows'), windowsPath, null, {value: false})) return null;
+        if (!Services.prompt.prompt(window, 'ZotFile', zz.ZFgetString('ui.osPathMappings.linux'), linuxPath, null, {value: false})) return null;
+        windowsPath.value = windowsPath.value.trim().replace(/\//g, '\\');
+        linuxPath.value = linuxPath.value.trim().replace(/\\/g, '/');
+        if (windowsPath.value == '' && linuxPath.value == '') return null;
+        return {windows: windowsPath.value, linux: linuxPath.value};
+    };
+
+    var addMapping = function () {
+        var mappings = getMappings();
+        var mapping = promptMapping();
+        if (!mapping) return;
+        mappings.push(mapping);
+        setMappings(mappings, mappings.length - 1);
+    };
+
+    var editMapping = function () {
+        var mappings = getMappings(),
+            index = $('zotfile-pathMappings').selectedIndex;
+        if (index < 0 || index >= mappings.length) return;
+        var mapping = promptMapping(mappings[index]);
+        if (!mapping) return;
+        mappings[index] = mapping;
+        setMappings(mappings, index);
+    };
+
+    var deleteMapping = function () {
+        var mappings = getMappings(),
+            index = $('zotfile-pathMappings').selectedIndex;
+        if (index < 0 || index >= mappings.length) return;
+        mappings.splice(index, 1);
+        setMappings(mappings, Math.min(index, mappings.length - 1));
+    };
+
+    var initPathMappings = function () {
+        setMappings(getMappings());
+        $('zotfile-pathMappings').addEventListener('dblclick', editMapping);
+        $('zotfile-pathMappings-add').addEventListener('command', addMapping);
+        $('zotfile-pathMappings-edit').addEventListener('command', editMapping);
+        $('zotfile-pathMappings-delete').addEventListener('command', deleteMapping);
+    };
+
     /**
      * Get the regular item for the current selection in the main window
      */
@@ -381,6 +459,7 @@
         $('zotfile-dest_dir-button').addEventListener('command', () => chooseFolder('dest_dir'));
         $('zotfile-preview-button').addEventListener('command', previewFilename);
         initTablet();
+        initPathMappings();
         $('zotfile-website-link').addEventListener('click', () => zz.Utils.loadURI('http://www.zotfile.com/index.html#renaming-rules'));
     };
 

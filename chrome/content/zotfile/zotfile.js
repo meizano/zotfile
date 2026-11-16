@@ -674,7 +674,7 @@ Zotero.ZotFile = new function() {
      * @return {string}       Path for directory or undefined if invalid directory
      */
     this.getSourceDir = async function (message) {
-        var source_dir = this.getPref('source_dir');
+        var source_dir = this.Path.map(this.getPref('source_dir'));
         // valid source directory?
         if (source_dir == "" || !(await this.Path.exists(source_dir))) {
             if(message) this.infoWindow(this.ZFgetString('general.error'), this.ZFgetString('file.invalidSourceFolder'));

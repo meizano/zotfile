@@ -54,7 +54,7 @@ Zotero.ZotFile.UI = new function() {
         // tablet
         if (zz.getPref('tablet') && atts.length > 0) {
             menu.push({separator: true});
-            let dest_dir = zz.getPref('tablet.dest_dir'),
+            let dest_dir = zz.Path.normalize(zz.getPref('tablet.dest_dir')),
                 valid_destination = false,
                 group_library = items.some(item => item.libraryID != Zotero.Libraries.userLibraryID),
                 on_tablet = atts.some(att => Tablet.getTabletStatus(att));

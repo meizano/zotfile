@@ -13,6 +13,10 @@ Information about files on the tablet is now stored in `zotfile-tablet.json` in 
 
 Not included in this version: extraction of PDF annotations and of the table of contents (also when getting files back from the tablet). Zotero's built-in PDF reader covers annotations and outlines.
 
+### OS path mappings
+
+If a folder is available under a different path on each operating system (for example a Google Drive folder that is `G:\My Drive\...` on Windows and mounted with rclone under `/media/.../GDrive/...` on Linux), add a mapping under Settings -> ZotFile -> Other Advanced Settings -> OS Path Mappings. Paths are translated automatically depending on the operating system, so the same source folder, custom location and tablet folder settings work on both systems.
+
 Build with `python build.py`, then install `zotfile-6.0.0.xpi` in Zotero via "Tools -> Plugins -> gear icon -> Install Plugin From File". If you use ZotFile's automatic renaming, turn off Zotero's own "Automatically rename locally added files" setting to avoid both renaming the same file.
 
 ## Development status
