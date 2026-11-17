@@ -61,3 +61,7 @@ pref("extensions.zotfile.tablet.subfolderFormat", "/%w/%y");
 
 pref("extensions.zotfile.rclone.enabled", false);
 pref("extensions.zotfile.rclone.path", "rclone");
+pref("extensions.zotfile.rclone.cache.enabled", true);
+pref("extensions.zotfile.rclone.cache.maxGB", 1);
+pref("extensions.zotfile.rclone.cache.verifyUpload", true);
+pref("extensions.zotfile.rclone.cache.touchOnOpen", true);

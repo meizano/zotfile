@@ -52,6 +52,8 @@ Zotero.ZotFile = new function() {
         // Register callbacks in Zotero as item observers
         if (this.notifierID === null)
             this.notifierID = Zotero.Notifier.registerObserver(this.notifierCallback, ['item'], 'zotfile');
+        // start the LRU cache eviction timers of the rclone integration
+        if (this.getPref('rclone.enabled')) this.Rclone.startTimers();
     };
 
     /**
@@ -59,6 +61,7 @@ Zotero.ZotFile = new function() {
      * @return {void}
      */
     this.shutdown = function () {
+        this.Rclone.stopTimers();
         if (this.notifierID !== null) {
             Zotero.Notifier.unregisterObserver(this.notifierID);
             this.notifierID = null;

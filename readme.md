@@ -21,6 +21,10 @@ If a folder is available under a different path on each operating system (for ex
 
 Each mapping can also define an rclone remote (for example `gdrive:MyDrive` for the folder above). With "Sync mapped folders with rclone" enabled, ZotFile then keeps that folder in sync with the remote using the rclone command line tool: files that ZotFile copies or moves into the folder are uploaded (`rclone copyto`), files that are missing locally (for example tablet files after switching from Windows to Linux) are downloaded automatically, and remote copies of files that ZotFile removes are deleted. Configure the path to the rclone executable in the same settings section.
 
+### Local LRU cache
+
+Uploaded files stay on disk and count against a local cache limit (default **1 GB**, `0` = unlimited; Settings -> ZotFile -> Other Advanced Settings). When the cache grows beyond the limit, the least recently used files are removed locally — but only after their existence on the remote has been verified with rclone, and never for files that were not uploaded, are zero bytes, or were used within the last minute. Removed files can be restored at any time with **"Fetch from Drive"** in the attachment context menu (Manage Attachments), which downloads the file from the remote and opens it. The cache index is stored as `zotfile-rclone-cache.json` in the Zotero profile directory. Note that the LRU order is approximate: it reflects upload/fetch/open activity observed by the plugin, not every file read.
+
 Build with `python build.py`, then install `zotfile-6.0.0.xpi` in Zotero via "Tools -> Plugins -> gear icon -> Install Plugin From File". If you use ZotFile's automatic renaming, turn off Zotero's own "Automatically rename locally added files" setting to avoid both renaming the same file.
 
 ## Development status

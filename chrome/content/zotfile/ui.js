@@ -51,6 +51,16 @@ Zotero.ZotFile.UI = new function() {
             command: () => zz.renameSelectedAttachments()
         });
         if (atts.length == 0) menu.push(warning(zz.ZFgetString('menu.itemHasNoAtts')));
+        // fetch from drive (rclone integration)
+        if (zz.getPref('rclone.enabled') && zz.getPref('rclone.cache.enabled') && atts.length > 0) {
+            menu.push({separator: true});
+            menu.push({
+                id: 'id-zotfile-fetch-drive',
+                label: zz.ZFgetString('ui.fetch-from-drive'),
+                tooltip: zz.ZFgetString('ui.fetch-from-drive.tooltip'),
+                command: () => this.fetchSelectedFromDrive(win)
+            });
+        }
         // tablet
         if (zz.getPref('tablet') && atts.length > 0) {
             menu.push({separator: true});
@@ -132,6 +142,48 @@ Zotero.ZotFile.UI = new function() {
             command: () => zz.openPreferenceWindow()
         });
         return menu;
+    };
+
+    /**
+     * Fetch the files of the selected attachments from the rclone remote and
+     * open them in Zotero
+     * @param  {Window} win Zotero main window
+     * @return {void}
+     */
+    this.fetchSelectedFromDrive = async function (win) {
+        var atts = Zotero.Items.get(zz.getSelectedAttachments());
+        if (atts.length == 0) return;
+        var progressWin = zz.progressWindow(zz.ZFgetString('ui.fetch-from-drive')),
+            description = false;
+        for (let att of atts) {
+            let progress = new progressWin.ItemProgress(zz.getIcon(att), att.getField('title'));
+            try {
+                let path = await att.getFilePathAsync();
+                if (!path) {
+                    description = true;
+                    progress.setError();
+                    continue;
+                }
+                if (!(await zz.Path.exists(path))) await zz.Rclone.ensureFile(path);
+                if (!(await zz.Path.exists(path))) {
+                    description = true;
+                    progress.setError();
+                    continue;
+                }
+                // touch the LRU cache and open the attachment
+                await zz.Rclone.touch(path);
+                win.ZoteroPane.viewAttachment(att.id);
+                progress.complete(att.getField('title'), zz.getIcon(att));
+            }
+            catch (e) {
+                description = true;
+                progress.setError();
+                zz.messages_fatalError.push(e);
+            }
+        }
+        if (description) progressWin.addDescription(zz.ZFgetString('general.warning.skippedAtt.msg'));
+        progressWin.startCloseTimer(zz.getPref('info_window_duration'));
+        zz.handleErrors();
     };
 
     /**
@@ -228,6 +280,29 @@ Zotero.ZotFile.UI = new function() {
         if (collections) listen(collections, 'click', () => {
             zz.Tablet.updateModifiedAttachmentsSearch();
         });
+
+        // LRU cache: touch the cache when the user opens an attachment (best
+        // effort wrapper around ZoteroPane.viewAttachment)
+        try {
+            let pane = win.ZoteroPane;
+            if (pane && typeof pane.viewAttachment == 'function' && !pane._zotfileTouchPatched) {
+                let original = pane.viewAttachment;
+                pane.viewAttachment = function () {
+                    try {
+                        let arg = arguments[0],
+                            ids = Array.isArray(arg) ? arg : [arg],
+                            items = Zotero.Items.get(ids).filter(item => item.isAttachment());
+                        if (items.length > 0) Zotero.ZotFile.Rclone.touchAttachments(items);
+                    }
+                    catch (e) {}
+                    return original.apply(this, arguments);
+                };
+                pane._zotfileTouchPatched = true;
+            }
+        }
+        catch (e) {
+            Zotero.logError(e);
+        }
     };
 
     this.addToAllWindows = function() {

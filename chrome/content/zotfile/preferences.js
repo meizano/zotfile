@@ -146,6 +146,28 @@
         }
     };
 
+    /**
+     * Show the current usage of the local rclone cache
+     */
+    var updateCacheStatus = async function () {
+        var label = $('zotfile-rclone-cache-status');
+        if (!label) return;
+        var text = '';
+        try {
+            if (zz.getPref('rclone.enabled') && zz.getPref('rclone.cache.enabled')) {
+                let stats = await zz.Rclone.cacheStats(),
+                    maxGB = parseFloat(zz.getPref('rclone.cache.maxGB'));
+                text = zz.ZFgetString('ui.rclone-cache-status', [
+                    (stats.bytes / 1073741824).toFixed(2),
+                    maxGB > 0 ? maxGB : '\u221E',
+                    stats.files
+                ]);
+            }
+        }
+        catch (e) {}
+        label.textContent = text;
+    };
+
     var onPrefChanged = function (pref) {
         if (['source_dir', 'dest_dir', 'import', 'tablet', 'tablet.dest_dir'].includes(pref)) updateFolderStatus();
         if (pref == 'tablet.dest_dir') changedBasefolder();
@@ -157,6 +179,12 @@
         if (['renameFormat', 'renameFormat_patent'].includes(pref)) checkRenameFormat(pref);
         // changing to custom location: choose folder now if not defined
         if (pref == 'import' && !zz.getPref('import') && zz.getPref('dest_dir') == '') chooseFolder('dest_dir');
+        // rclone cache
+        if (pref == 'rclone.enabled') {
+            if (zz.getPref('rclone.enabled')) zz.Rclone.startTimers();
+            else zz.Rclone.stopTimers();
+        }
+        if (pref.startsWith('rclone')) updateCacheStatus();
     };
 
     var chooseFolder = async function (pref) {
@@ -425,6 +453,15 @@
         $('zotfile-pathMappings-delete').addEventListener('command', deleteMapping);
     };
 
+    var initRclone = function () {
+        $('zotfile-rclone-cache-clear').addEventListener('command', async function () {
+            if (Services.prompt.confirm(window, 'ZotFile', zz.ZFgetString('ui.rclone-cache-clear.confirm')))
+                await zz.Rclone.clearCache(true);
+            updateCacheStatus();
+        });
+        updateCacheStatus();
+    };
+
     /**
      * Get the regular item for the current selection in the main window
      */
@@ -466,6 +503,7 @@
         $('zotfile-preview-button').addEventListener('command', previewFilename);
         initTablet();
         initPathMappings();
+        initRclone();
         $('zotfile-website-link').addEventListener('click', () => zz.Utils.loadURI('http://www.zotfile.com/index.html#renaming-rules'));
     };
 

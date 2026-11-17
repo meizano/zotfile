@@ -192,5 +192,19 @@
 			<html:input type="text" data-pref="rclone.path" data-enable="rclone.enabled" style="flex: 1"/>
 		</hbox>
 		<description data-zf="rclone-executable-desc" style="font-size: 0.9em"/>
+		<separator class="thin"/>
+
+		<checkbox data-zf="rclone-cache-enabled" data-pref="rclone.cache.enabled" data-enable="rclone.enabled" native="true"/>
+		<hbox align="center">
+			<label data-zf="rclone-cache-limit" data-enable="rclone.enabled rclone.cache.enabled"/>
+			<html:input type="number" min="0" step="0.1" data-pref="rclone.cache.maxGB" data-enable="rclone.enabled rclone.cache.enabled" style="width: 6em"/>
+			<label data-zf="rclone-cache-gb" data-enable="rclone.enabled rclone.cache.enabled"/>
+			<checkbox data-zf="rclone-cache-verify" data-pref="rclone.cache.verifyUpload" data-enable="rclone.enabled rclone.cache.enabled" native="true"/>
+		</hbox>
+		<hbox align="center">
+			<label id="zotfile-rclone-cache-status" data-enable="rclone.enabled rclone.cache.enabled" style="font-size: 0.9em"/>
+			<button id="zotfile-rclone-cache-clear" data-zf="rclone-cache-clear" data-enable="rclone.enabled rclone.cache.enabled"/>
+		</hbox>
+		<description data-zf="rclone-cache-desc" style="font-size: 0.9em"/>
 	</groupbox>
 </vbox>
