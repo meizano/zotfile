@@ -5,7 +5,7 @@
 
 var chromeHandle = null;
 
-var ZOTFILE_SCRIPTS = ['zotfile', 'utils', 'wildcards', 'tablet', 'notifier', 'ui'];
+var ZOTFILE_SCRIPTS = ['zotfile', 'utils', 'wildcards', 'tablet', 'notifier', 'ui', 'rclone'];
 var ZOTFILE_LOCALES = ['en-US', 'de-DE', 'fr-FR', 'it-IT'];
 
 function install() {}

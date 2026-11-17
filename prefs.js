@@ -58,3 +58,6 @@ pref("extensions.zotfile.tablet.projectFolders", 0);
 pref("extensions.zotfile.tablet.showwarning", true);
 pref("extensions.zotfile.tablet.subfolder", false);
 pref("extensions.zotfile.tablet.subfolderFormat", "/%w/%y");
+
+pref("extensions.zotfile.rclone.enabled", false);
+pref("extensions.zotfile.rclone.path", "rclone");

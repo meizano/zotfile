@@ -284,6 +284,8 @@ Zotero.ZotFile.Tablet = new function() {
             return await att.getFilePathAsync();
         // background mode
         var path = self.getInfo(att, 'location');
+        // file not available locally: download from the rclone remote (if mapped)
+        if(!(await zz.Path.exists(path))) await zz.Rclone.ensureFile(path);
         if(!(await zz.Path.exists(path))) {
             if (verbose) zz.infoWindow('ZotFile Error', 'The file "' + path + '" does not exist.');
             return false;
@@ -673,6 +675,8 @@ Zotero.ZotFile.Tablet = new function() {
                 // replace zotero file
                 if(tablet_status == 0) {
                     await IOUtils.move(path_tablet, path_zotero);
+                    // remove the file from the rclone remote (if mapped)
+                    await zz.Rclone.deleteFile(path_tablet);
                     item_pulled = true;
                 }
             }
@@ -696,12 +700,14 @@ Zotero.ZotFile.Tablet = new function() {
                     await att_new.saveTx();
                     // remove file on tablet
                     await IOUtils.remove(path_tablet, {ignoreAbsent: true});
+                    await zz.Rclone.deleteFile(path_tablet);
                     item_pulled = true;
                 }
             }
             // Pull without replacement (i.e. remove file on tablet)
             if(tablet_status == 2) {
                 await IOUtils.remove(path_tablet, {ignoreAbsent: true});
+                await zz.Rclone.deleteFile(path_tablet);
                 item_pulled = true;
             }
         }

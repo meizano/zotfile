@@ -3,8 +3,8 @@
 		"zotfile@columbia.edu": {
 			"updates": [
 				{
-					"version": "6.1.0",
-					"update_link": "https://github.com/meizano/zotfile/releases/download/v6.1.0/zotfile-6.1.0.xpi",
+					"version": "6.2.0",
+					"update_link": "https://github.com/meizano/zotfile/releases/download/v6.2.0/zotfile-6.2.0.xpi",
 					"applications": {
 						"zotero": {
 							"strict_min_version": "8.0",

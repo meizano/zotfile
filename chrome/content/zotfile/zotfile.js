@@ -531,6 +531,9 @@ Zotero.ZotFile = new function() {
         if (sourcePath == destPath) return sourcePath;
         // move file to new location
         await IOUtils.move(sourcePath, destPath, {noOverwrite: true});
+        // sync the move with the rclone remote (if the folder is mapped)
+        await this.Rclone.uploadFile(destPath);
+        await this.Rclone.deleteFile(sourcePath);
         // delete empty folders after moving file
         await this.removeEmptyFolders(sourceDir);
         // return path to new location
@@ -554,6 +557,8 @@ Zotero.ZotFile = new function() {
         if (sourcePath == destPath) return sourcePath;
         // copy file
         await IOUtils.copy(sourcePath, destPath, {noOverwrite: true});
+        // upload the copy to the rclone remote (if the folder is mapped)
+        await this.Rclone.uploadFile(destPath);
         return destPath;
     };
 

@@ -1,7 +1,7 @@
 {
 	"manifest_version": 2,
 	"name": "ZotFile",
-	"version": "6.1.0",
+	"version": "6.2.0",
 	"description": "Advanced PDF management for Zotero",
 	"author": "Joscha Legewie",
 	"homepage_url": "http://www.zotfile.com",

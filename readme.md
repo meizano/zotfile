@@ -17,6 +17,10 @@ Not included in this version: extraction of PDF annotations and of the table of 
 
 If a folder is available under a different path on each operating system (for example a Google Drive folder that is `G:\My Drive\...` on Windows and mounted with rclone under `/media/.../GDrive/...` on Linux), add a mapping under Settings -> ZotFile -> Other Advanced Settings -> OS Path Mappings. Paths are translated automatically depending on the operating system, so the same source folder, custom location and tablet folder settings work on both systems.
 
+### rclone sync
+
+Each mapping can also define an rclone remote (for example `gdrive:MyDrive` for the folder above). With "Sync mapped folders with rclone" enabled, ZotFile then keeps that folder in sync with the remote using the rclone command line tool: files that ZotFile copies or moves into the folder are uploaded (`rclone copyto`), files that are missing locally (for example tablet files after switching from Windows to Linux) are downloaded automatically, and remote copies of files that ZotFile removes are deleted. Configure the path to the rclone executable in the same settings section.
+
 Build with `python build.py`, then install `zotfile-6.0.0.xpi` in Zotero via "Tools -> Plugins -> gear icon -> Install Plugin From File". If you use ZotFile's automatic renaming, turn off Zotero's own "Automatically rename locally added files" setting to avoid both renaming the same file.
 
 ## Development status

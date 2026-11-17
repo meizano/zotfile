@@ -364,25 +364,31 @@
         while (list.firstChild) list.firstChild.remove();
         for (let mapping of mappings) {
             let option = document.createElementNS('http://www.w3.org/1999/xhtml', 'option');
-            option.textContent = (mapping.windows || '?') + '  \u21C4  ' + (mapping.linux || '?');
+            option.textContent = (mapping.windows || '?') + '  \u21C4  ' + (mapping.linux || '?') +
+                (mapping.remote ? '  \u21B3  ' + mapping.remote : '');
             list.appendChild(option);
         }
         if (select !== undefined && select >= 0 && select < mappings.length) list.selectedIndex = select;
     };
 
     /**
-     * Ask the user for the Windows and Linux path of the same folder
-     * @return {object} Object with windows and linux paths or null if canceled
+     * Ask the user for the Windows path, Linux path and rclone remote of the same folder
+     * @return {object} Object with windows, linux and remote paths or null if canceled
      */
     var promptMapping = function (mapping) {
         var windowsPath = {value: mapping ? mapping.windows || '' : ''},
-            linuxPath = {value: mapping ? mapping.linux || '' : ''};
+            linuxPath = {value: mapping ? mapping.linux || '' : ''},
+            remotePath = {value: mapping ? mapping.remote || '' : ''};
         if (!Services.prompt.prompt(window, 'ZotFile', zz.ZFgetString('ui.osPathMappings.windows'), windowsPath, null, {value: false})) return null;
         if (!Services.prompt.prompt(window, 'ZotFile', zz.ZFgetString('ui.osPathMappings.linux'), linuxPath, null, {value: false})) return null;
+        if (!Services.prompt.prompt(window, 'ZotFile', zz.ZFgetString('ui.osPathMappings.remote'), remotePath, null, {value: false})) return null;
         windowsPath.value = windowsPath.value.trim().replace(/\//g, '\\');
         linuxPath.value = linuxPath.value.trim().replace(/\\/g, '/');
+        remotePath.value = remotePath.value.trim().replace(/[\\]/g, '/');
         if (windowsPath.value == '' && linuxPath.value == '') return null;
-        return {windows: windowsPath.value, linux: linuxPath.value};
+        var mappingNew = {windows: windowsPath.value, linux: linuxPath.value};
+        if (remotePath.value != '') mappingNew.remote = remotePath.value;
+        return mappingNew;
     };
 
     var addMapping = function () {

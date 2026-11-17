@@ -68,7 +68,8 @@ Zotero.ZotFile.Path = new function() {
         for (let rule of rules) {
             for (let os in rule) {
                 let prefix = rule[os];
-                if (os === platform || !prefix) continue;
+                // only map between platform prefixes ('remote' holds the rclone remote)
+                if (!['windows', 'mac', 'linux'].includes(os) || os === platform || !prefix) continue;
                 // windows-style prefixes (drive letter, UNC path) are matched case-insensitively
                 let ci = isWindowsPrefix(prefix);
                 let prefixCanon = canonical(prefix, ci);

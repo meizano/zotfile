@@ -183,5 +183,14 @@
 				<button id="zotfile-pathMappings-delete" data-zf="delete-mapping"/>
 			</vbox>
 		</hbox>
+		<separator class="thin"/>
+
+		<label data-zf="rclone-sync"/>
+		<description data-zf="rclone-desc" style="font-size: 0.9em"/>
+		<hbox align="center">
+			<checkbox data-zf="rclone-enabled" data-pref="rclone.enabled" native="true"/>
+			<html:input type="text" data-pref="rclone.path" data-enable="rclone.enabled" style="flex: 1"/>
+		</hbox>
+		<description data-zf="rclone-executable-desc" style="font-size: 0.9em"/>
 	</groupbox>
 </vbox>
